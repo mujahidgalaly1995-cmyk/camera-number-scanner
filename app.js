@@ -4,7 +4,7 @@
     const STORAGE_KEY = 'mujahid-scanner-items-v1';
     const HINT_KEY = 'mujahid-scanner-install-hint';
     const AUTO_PREF_KEY = 'mujahid-scanner-auto';
-    const AUTO_SCAN_INTERVAL_MS = 1800;
+    const AUTO_SCAN_INTERVAL_MS = 1200;
     const AUTO_MIN_CONFIDENCE = 55;
     const MANUAL_MIN_CONFIDENCE = 55;
 
@@ -18,6 +18,7 @@
     let workerPromise = null;
     let audioCtx = null;
     let lastAutoAdd = { value: null };
+    let autoMisses = 0;
     let toastTimer = null;
     let cameraBlocked = false;
     let autoScanPref = loadAutoPref();
@@ -183,8 +184,8 @@
             videoStream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     facingMode: { ideal: 'environment' },
-                    width: { ideal: 1920 },
-                    height: { ideal: 1080 },
+                    width: { ideal: 2560 },
+                    height: { ideal: 1440 },
                 },
                 audio: false,
             });
@@ -254,6 +255,24 @@
     }
 
     // ---------- OCR worker ----------
+    function warmUpWorker(worker) {
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 260;
+            canvas.height = 90;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#111111';
+            ctx.font = 'bold 52px sans-serif';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('000', 24, 46);
+            worker.recognize(canvas).catch(() => {});
+        } catch (e) {
+            // Warm-up is best effort only.
+        }
+    }
+
     function initTesseractWorker() {
         if (tesseractWorker) return Promise.resolve(tesseractWorker);
         if (workerPromise) return workerPromise;
@@ -269,8 +288,12 @@
             });
             await worker.setParameters({
                 tessedit_char_whitelist: '0123456789.,',
-                tessedit_pageseg_mode: '11',
+                tessedit_pageseg_mode: '7',
+                load_system_dawg: '0',
+                load_freq_dawg: '0',
+                user_defined_dpi: '300',
             });
+            warmUpWorker(worker);
             tesseractWorker = worker;
             return worker;
         })().catch((err) => {
@@ -315,7 +338,7 @@
         return { sx, sy, sw, sh };
     }
 
-    function enhanceAndExportCanvas(canvas, binarize = true) {
+    function enhanceCanvas(canvas, binarize = true) {
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         const width = canvas.width;
         const height = canvas.height;
@@ -352,7 +375,6 @@
         }
 
         ctx.putImageData(imgData, 0, 0);
-        return canvas.toDataURL('image/png');
     }
 
     function captureViewfinderFrame(binarize = true) {
@@ -364,7 +386,7 @@
         const stripH = Math.max(1, Math.round(sh));
 
         // Locate the printed line first, then crop tightly around it.
-        const analysisScale = Math.min(1, 1100 / stripW);
+        const analysisScale = Math.min(1, 900 / stripW);
         const aw = Math.max(1, Math.round(stripW * analysisScale));
         const ah = Math.max(1, Math.round(stripH * analysisScale));
 
@@ -388,12 +410,12 @@
         let cropY = sy;
         let cropW = sw;
         let cropH = sh;
-        let upscale = Math.min(2.5, Math.max(1.5, 1100 / Math.max(1, sw)));
+        let upscale = Math.min(2.5, Math.max(1.5, 900 / Math.max(1, sw)));
 
         if (region) {
             const inverseScale = 1 / analysisScale;
-            const padXp = Math.max(6, Math.round(region.width * 0.1));
-            const padYp = Math.max(6, Math.round(region.height * 0.3));
+            const padXp = Math.max(8, Math.round(region.width * 0.14));
+            const padYp = Math.max(8, Math.round(region.height * 0.5));
             const rx = Math.max(0, region.left - padXp);
             const ry = Math.max(0, region.top - padYp);
             const rw = Math.min(aw, region.left + region.width + padXp) - rx;
@@ -403,7 +425,9 @@
             cropY = sy + ry * inverseScale;
             cropW = rw * inverseScale;
             cropH = rh * inverseScale;
-            upscale = Math.min(4, Math.max(2, 1200 / Math.max(1, cropW)));
+
+            const regionVideoHeight = region.height * inverseScale;
+            upscale = Math.min(6, Math.max(2, 60 / Math.max(1, regionVideoHeight)));
         }
 
         cropX = Math.max(0, cropX);
@@ -412,6 +436,9 @@
         cropH = Math.min(cropH, video.videoHeight - cropY);
         if (cropW < 8 || cropH < 8) return null;
 
+        // Keep the line near 1000px wide: enough detail for Tesseract without
+        // wasting time on oversized images.
+        upscale = Math.min(upscale, 1000 / Math.max(1, cropW));
         const outW = Math.max(1, Math.round(cropW * upscale));
         const outH = Math.max(1, Math.round(cropH * upscale));
 
@@ -422,7 +449,20 @@
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, outW, outH);
 
-        return enhanceAndExportCanvas(cropCanvas, binarize);
+        enhanceCanvas(cropCanvas, binarize);
+
+        // Tesseract needs whitespace around the glyphs; a plain white frame
+        // measurably improves recognition of short digit strings.
+        const margin = Math.max(14, Math.round(outH * 0.25));
+        const padded = document.createElement('canvas');
+        padded.width = outW + margin * 2;
+        padded.height = outH + margin * 2;
+        const paddedCtx = padded.getContext('2d');
+        paddedCtx.fillStyle = '#ffffff';
+        paddedCtx.fillRect(0, 0, padded.width, padded.height);
+        paddedCtx.drawImage(cropCanvas, margin, margin);
+
+        return padded;
     }
 
     // ---------- OCR ----------
@@ -430,8 +470,8 @@
         return window.ScannerOCR ? ScannerOCR.parseNumber(text) : null;
     }
 
-    async function recognizeFrame(worker, imageDataUrl) {
-        const result = await worker.recognize(imageDataUrl);
+    async function recognizeFrame(worker, image) {
+        const result = await worker.recognize(image);
         const data = (result && result.data) || {};
         const candidate = parseNumberFromOCR(data.text || '');
         const confidence = typeof data.confidence === 'number' ? data.confidence : 0;
@@ -459,26 +499,32 @@
                 : [
                     () => captureViewfinderFrame(true),
                     () => captureViewfinderFrame(false),
+                    () => captureViewfinderFrame(true),
                 ];
             let best = null;
 
             for (let attempt = 0; attempt < frames.length; attempt++) {
-                const imageDataUrl = frames[attempt]();
-                if (!imageDataUrl) continue;
+                const image = frames[attempt]();
+                if (!image) continue;
 
-                const result = await recognizeFrame(worker, imageDataUrl);
+                const result = await recognizeFrame(worker, image);
                 if (result.candidate !== null && (!best || result.confidence > best.confidence)) {
                     best = result;
                 }
                 if (best && best.confidence >= MANUAL_MIN_CONFIDENCE) break;
                 if (attempt < frames.length - 1) {
-                    await new Promise((resolve) => setTimeout(resolve, 150));
+                    await new Promise((resolve) => setTimeout(resolve, isAuto ? 60 : 120));
                 }
             }
 
             if (best && best.candidate !== null) {
                 if (isAuto) {
-                    if (best.confidence < AUTO_MIN_CONFIDENCE) return;
+                    if (best.confidence < AUTO_MIN_CONFIDENCE) {
+                        autoMisses++;
+                        if (autoMisses >= 2) lastAutoAdd = { value: null };
+                        return;
+                    }
+                    autoMisses = 0;
                     // Keep aiming at the same paper without adding duplicates.
                     if (lastAutoAdd.value === best.candidate) return;
 
@@ -489,6 +535,7 @@
                 } else {
                     playBeep(true);
                     lastAutoAdd = { value: best.candidate };
+                    autoMisses = 0;
                     addNumberToList(best.candidate, 'کامێرا');
                     if (best.confidence >= MANUAL_MIN_CONFIDENCE) {
                         showNotification(`ژمارەی ${formatNumber(best.candidate)} زیادکرا`, 'success');
@@ -496,7 +543,10 @@
                         showNotification(`ژمارەی ${formatNumber(best.candidate)} زیادکرا، بەڵام کەمێک ناڕوون بوو`, 'error');
                     }
                 }
-            } else if (!isAuto) {
+            } else if (isAuto) {
+                autoMisses++;
+                if (autoMisses >= 2) lastAutoAdd = { value: null };
+            } else {
                 playBeep(false);
                 showNotification('ژمارەکە بە تەواوی لەناو چوارگۆشەکە دابنێ و دووبارە تاقی بکەرەوە', 'error');
             }
