@@ -298,8 +298,8 @@
         const mediaLeft = stageRect.left + (stageRect.width - mediaW) / 2;
         const mediaTop = stageRect.top + (stageRect.height - mediaH) / 2;
 
-        const padX = frameRect.width * 0.08;
-        const padY = frameRect.height * 0.55;
+        const padX = Math.max(4, frameRect.width * 0.03);
+        const padY = Math.max(6, frameRect.height * 0.15);
 
         let sx = (frameRect.left - padX - mediaLeft) / scale;
         let sy = (frameRect.top - padY - mediaTop) / scale;
@@ -425,23 +425,6 @@
         return enhanceAndExportCanvas(cropCanvas, binarize);
     }
 
-    function captureFullFrame(binarize = false) {
-        if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return null;
-
-        const scale = Math.min(1, 1280 / video.videoWidth);
-        const width = Math.max(1, Math.round(video.videoWidth * scale));
-        const height = Math.max(1, Math.round(video.videoHeight * scale));
-
-        cropCanvas.width = width;
-        cropCanvas.height = height;
-        const ctx = cropCanvas.getContext('2d', { willReadFrequently: true });
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(video, 0, 0, width, height);
-
-        return enhanceAndExportCanvas(cropCanvas, binarize);
-    }
-
     // ---------- OCR ----------
     function parseNumberFromOCR(text) {
         return window.ScannerOCR ? ScannerOCR.parseNumber(text) : null;
@@ -476,7 +459,6 @@
                 : [
                     () => captureViewfinderFrame(true),
                     () => captureViewfinderFrame(false),
-                    () => captureFullFrame(false),
                 ];
             let best = null;
 
@@ -516,7 +498,7 @@
                 }
             } else if (!isAuto) {
                 playBeep(false);
-                showNotification('ژمارە بە ڕوونی نەدۆزرایەوە، کامێراکە نزیکتر بکەوە', 'error');
+                showNotification('ژمارەکە بە تەواوی لەناو چوارگۆشەکە دابنێ و دووبارە تاقی بکەرەوە', 'error');
             }
         } catch (err) {
             console.error('Scan Error:', err);

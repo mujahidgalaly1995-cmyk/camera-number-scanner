@@ -1,4 +1,4 @@
-const VERSION = 'v6';
+const VERSION = 'v7';
 const APP_CACHE = `scanner-app-${VERSION}`;
 const RUNTIME_CACHE = `scanner-runtime-${VERSION}`;
 const VENDOR_CACHE = 'scanner-vendor-v1';
