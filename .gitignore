@@ -2,3 +2,5 @@ node_modules/
 .tools/
 .DS_Store
 src/
+test-image.png
+eng.traineddata

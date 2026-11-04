@@ -3,8 +3,10 @@
 
     const STORAGE_KEY = 'mujahid-scanner-items-v1';
     const HINT_KEY = 'mujahid-scanner-install-hint';
-    const AUTO_SCAN_INTERVAL_MS = 2200;
-    const AUTO_DUP_WINDOW_MS = 8000;
+    const AUTO_PREF_KEY = 'mujahid-scanner-auto';
+    const AUTO_SCAN_INTERVAL_MS = 1800;
+    const AUTO_MIN_CONFIDENCE = 55;
+    const MANUAL_MIN_CONFIDENCE = 55;
 
     // ---------- State ----------
     let items = loadItems();
@@ -15,15 +17,18 @@
     let tesseractWorker = null;
     let workerPromise = null;
     let audioCtx = null;
-    let lastAutoAdd = { value: null, at: 0 };
+    let lastAutoAdd = { value: null };
     let toastTimer = null;
     let cameraBlocked = false;
+    let autoScanPref = loadAutoPref();
 
     // ---------- Elements ----------
     const $ = (id) => document.getElementById(id);
     const video = $('cameraVideo');
     const viewfinder = $('viewfinder');
     const cropCanvas = $('cropCanvas');
+    const analysisCanvas = document.createElement('canvas');
+    const analysisCtx = analysisCanvas.getContext('2d', { willReadFrequently: true });
     const startCameraBtn = $('startCameraBtn');
     const cameraPlaceholder = $('cameraPlaceholder');
     const captureScanBtn = $('captureScanBtn');
@@ -80,6 +85,23 @@
             localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
         } catch (e) {
             // Storage can be unavailable in private mode; app still works in memory.
+        }
+    }
+
+    function loadAutoPref() {
+        try {
+            const stored = localStorage.getItem(AUTO_PREF_KEY);
+            return stored === null ? true : stored === '1';
+        } catch (e) {
+            return true;
+        }
+    }
+
+    function saveAutoPref(active) {
+        try {
+            localStorage.setItem(AUTO_PREF_KEY, active ? '1' : '0');
+        } catch (e) {
+            // ignore
         }
     }
 
@@ -194,7 +216,7 @@
             const worker = await window.Tesseract.createWorker('eng');
             await worker.setParameters({
                 tessedit_char_whitelist: '0123456789.,',
-                tessedit_pageseg_mode: '7',
+                tessedit_pageseg_mode: '11',
             });
             tesseractWorker = worker;
             return worker;
@@ -207,7 +229,7 @@
     }
 
     // ---------- Frame capture (maps the on-screen viewfinder to video pixels) ----------
-    function captureViewfinderFrame() {
+    function getStripMapping() {
         if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return null;
 
         const videoRect = video.getBoundingClientRect();
@@ -220,8 +242,8 @@
         const mediaLeft = videoRect.left + (videoRect.width - mediaW) / 2;
         const mediaTop = videoRect.top + (videoRect.height - mediaH) / 2;
 
-        const padX = frameRect.width * 0.06;
-        const padY = frameRect.height * 0.5;
+        const padX = frameRect.width * 0.08;
+        const padY = frameRect.height * 0.55;
 
         let sx = (frameRect.left - padX - mediaLeft) / scale;
         let sy = (frameRect.top - padY - mediaTop) / scale;
@@ -234,82 +256,123 @@
         sh = Math.min(sh, video.videoHeight - sy);
         if (sw < 8 || sh < 8) return null;
 
-        const outW = Math.round(sw);
-        const outH = Math.round(sh);
+        return { sx, sy, sw, sh };
+    }
+
+    function captureViewfinderFrame() {
+        const mapping = getStripMapping();
+        if (!mapping) return null;
+
+        const { sx, sy, sw, sh } = mapping;
+        const stripW = Math.max(1, Math.round(sw));
+        const stripH = Math.max(1, Math.round(sh));
+
+        // Locate the printed line first, then crop tightly around it.
+        const analysisScale = Math.min(1, 1100 / stripW);
+        const aw = Math.max(1, Math.round(stripW * analysisScale));
+        const ah = Math.max(1, Math.round(stripH * analysisScale));
+
+        analysisCanvas.width = aw;
+        analysisCanvas.height = ah;
+        analysisCtx.drawImage(video, sx, sy, sw, sh, 0, 0, aw, ah);
+
+        const analysisData = analysisCtx.getImageData(0, 0, aw, ah).data;
+        const totalPixels = aw * ah;
+        const gray = new Uint8ClampedArray(totalPixels);
+
+        for (let i = 0, p = 0; i < analysisData.length; i += 4, p++) {
+            gray[p] = (analysisData[i] * 0.299 + analysisData[i + 1] * 0.587 + analysisData[i + 2] * 0.114) | 0;
+        }
+
+        const binary = ScannerOCR.adaptiveBinarize(gray, aw, ah);
+
+        const region = ScannerOCR.findTextRegion(binary, aw, ah);
+
+        let cropX = sx;
+        let cropY = sy;
+        let cropW = sw;
+        let cropH = sh;
+        let upscale = Math.min(2.5, Math.max(1.5, 1100 / Math.max(1, sw)));
+
+        if (region) {
+            const inverseScale = 1 / analysisScale;
+            const padXp = Math.max(6, Math.round(region.width * 0.1));
+            const padYp = Math.max(6, Math.round(region.height * 0.3));
+            const rx = Math.max(0, region.left - padXp);
+            const ry = Math.max(0, region.top - padYp);
+            const rw = Math.min(aw, region.left + region.width + padXp) - rx;
+            const rh = Math.min(ah, region.top + region.height + padYp) - ry;
+
+            cropX = sx + rx * inverseScale;
+            cropY = sy + ry * inverseScale;
+            cropW = rw * inverseScale;
+            cropH = rh * inverseScale;
+            upscale = Math.min(4, Math.max(2, 1200 / Math.max(1, cropW)));
+        }
+
+        cropX = Math.max(0, cropX);
+        cropY = Math.max(0, cropY);
+        cropW = Math.min(cropW, video.videoWidth - cropX);
+        cropH = Math.min(cropH, video.videoHeight - cropY);
+        if (cropW < 8 || cropH < 8) return null;
+
+        const outW = Math.max(1, Math.round(cropW * upscale));
+        const outH = Math.max(1, Math.round(cropH * upscale));
+
         cropCanvas.width = outW;
         cropCanvas.height = outH;
         const ctx = cropCanvas.getContext('2d', { willReadFrequently: true });
-        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, outW, outH);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, outW, outH);
 
         const imgData = ctx.getImageData(0, 0, outW, outH);
         const data = imgData.data;
-        const total = outW * outH;
-        const gray = new Uint8ClampedArray(total);
-        const histogram = new Uint32Array(256);
+        const cropTotal = outW * outH;
+        const cropGray = new Uint8ClampedArray(cropTotal);
+        const cropHistogram = new Uint32Array(256);
 
         for (let i = 0, p = 0; i < data.length; i += 4, p++) {
             const g = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) | 0;
-            gray[p] = g;
-            histogram[g]++;
+            cropGray[p] = g;
+            cropHistogram[g]++;
         }
 
-        // Otsu threshold: works in low light and on faint prints.
-        let sum = 0;
-        for (let t = 0; t < 256; t++) sum += t * histogram[t];
-        let sumB = 0;
-        let weightB = 0;
-        let maxVariance = 0;
-        let threshold = 135;
-        for (let t = 0; t < 256; t++) {
-            weightB += histogram[t];
-            if (weightB === 0) continue;
-            const weightF = total - weightB;
-            if (weightF === 0) break;
-            sumB += t * histogram[t];
-            const meanB = sumB / weightB;
-            const meanF = (sum - sumB) / weightF;
-            const variance = weightB * weightF * (meanB - meanF) * (meanB - meanF);
-            if (variance > maxVariance) {
-                maxVariance = variance;
-                threshold = t;
-            }
+        const cropLow = ScannerOCR.percentileFromHistogram(cropHistogram, cropTotal, 0.02);
+        const cropHigh = ScannerOCR.percentileFromHistogram(cropHistogram, cropTotal, 0.98);
+        const cropSpan = Math.max(1, cropHigh - cropLow);
+        const stretched = new Uint32Array(256);
+        for (let p = 0; p < cropTotal; p++) {
+            const value = Math.max(0, Math.min(255, Math.round(((cropGray[p] - cropLow) * 255) / cropSpan)));
+            cropGray[p] = value;
+            stretched[value]++;
         }
-        threshold = Math.min(200, Math.max(70, threshold));
 
-        for (let p = 0; p < total; p++) {
-            const value = gray[p] < threshold ? 0 : 255;
+        const cropThreshold = ScannerOCR.otsuFromHistogram(stretched, cropTotal);
+        for (let p = 0; p < cropTotal; p++) {
+            const value = cropGray[p] < cropThreshold ? 0 : 255;
             const i = p * 4;
             data[i] = value;
             data[i + 1] = value;
             data[i + 2] = value;
             data[i + 3] = 255;
         }
-        ctx.putImageData(imgData, 0, 0);
 
+        ctx.putImageData(imgData, 0, 0);
         return cropCanvas.toDataURL('image/png');
     }
 
     // ---------- OCR ----------
     function parseNumberFromOCR(text) {
-        if (!text) return null;
-        const westernText = text
-            .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
-            .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));
+        return window.ScannerOCR ? ScannerOCR.parseNumber(text) : null;
+    }
 
-        const matches = westernText.match(/\d[\d,.]*\d|\d/g) || [];
-        let best = null;
-
-        for (const raw of matches) {
-            const cleaned = raw.replace(/,/g, '');
-            if (!/^\d+(\.\d+)?$/.test(cleaned)) continue;
-            const num = parseFloat(cleaned);
-            if (!Number.isFinite(num) || num <= 0) continue;
-            if (!best || cleaned.length > best.length) {
-                best = { num, length: cleaned.length };
-            }
-        }
-
-        return best ? best.num : null;
+    async function recognizeFrame(worker, imageDataUrl) {
+        const result = await worker.recognize(imageDataUrl);
+        const data = (result && result.data) || {};
+        const candidate = parseNumberFromOCR(data.text || '');
+        const confidence = typeof data.confidence === 'number' ? data.confidence : 0;
+        return { candidate, confidence };
     }
 
     async function performScan(isAuto = false) {
@@ -323,36 +386,46 @@
             return;
         }
 
-        const imageDataUrl = captureViewfinderFrame();
-        if (!imageDataUrl) {
-            if (!isAuto) showNotification('وێنە وەرنەگیرا، دووبارە هەوڵ بدە', 'error');
-            return;
-        }
-
         isProcessing = true;
         if (!isAuto) scanSpinner.classList.remove('hidden');
 
         try {
             const worker = await initTesseractWorker();
-            const result = await worker.recognize(imageDataUrl);
-            const text = (result && result.data && result.data.text) || '';
-            const candidate = parseNumberFromOCR(text);
+            const attempts = isAuto ? 1 : 2;
+            let best = null;
 
-            if (candidate !== null) {
+            for (let attempt = 0; attempt < attempts; attempt++) {
+                const imageDataUrl = captureViewfinderFrame();
+                if (!imageDataUrl) break;
+
+                const result = await recognizeFrame(worker, imageDataUrl);
+                if (result.candidate !== null && (!best || result.confidence > best.confidence)) {
+                    best = result;
+                }
+                if (best && best.confidence >= MANUAL_MIN_CONFIDENCE) break;
+                if (attempt < attempts - 1) {
+                    await new Promise((resolve) => setTimeout(resolve, 250));
+                }
+            }
+
+            if (best && best.candidate !== null) {
                 if (isAuto) {
-                    const now = Date.now();
-                    if (lastAutoAdd.value === candidate && now - lastAutoAdd.at < AUTO_DUP_WINDOW_MS) {
-                        return;
-                    }
-                    lastAutoAdd = { value: candidate, at: now };
+                    if (best.confidence < AUTO_MIN_CONFIDENCE) return;
+                    // Keep aiming at the same paper without adding duplicates.
+                    if (lastAutoAdd.value === best.candidate) return;
+
+                    lastAutoAdd = { value: best.candidate };
                     playBeep(true);
-                    addNumberToList(candidate, 'کامێرا (خۆکار)');
-                    showNotification(`ژمارەی ${formatNumber(candidate)} زیادکرا`, 'success');
+                    addNumberToList(best.candidate, 'کامێرا (خۆکار)');
+                    showNotification(`ژمارەی ${formatNumber(best.candidate)} زیادکرا`, 'success');
                 } else {
                     playBeep(true);
-                    candidateInput.value = String(candidate);
+                    candidateInput.value = String(best.candidate);
                     candidateCard.classList.remove('hidden');
                     candidateCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    if (best.confidence < MANUAL_MIN_CONFIDENCE) {
+                        showNotification('ژمارەکە کەمێک ناڕوونە، تکایە پشکنینی بکە', 'error');
+                    }
                 }
             } else if (!isAuto) {
                 playBeep(false);
@@ -560,23 +633,29 @@
         }
     }
 
-    function toggleAutoScan() {
-        isAutoScanActive = !isAutoScanActive;
+    function setAutoScan(active, announce = true) {
+        isAutoScanActive = active;
+        autoScanPref = active;
+        saveAutoPref(active);
+        setAutoScanUi(active);
 
-        if (isAutoScanActive) {
-            setAutoScanUi(true);
-            showNotification('دۆخی خۆکار چالاک کرا', 'success');
+        clearInterval(autoScanTimer);
+        autoScanTimer = null;
+
+        if (active) {
+            if (announce) showNotification('خوێندنەوەی خۆکار چالاک کرا', 'success');
             ensureCameraRunning();
             autoScanTimer = setInterval(() => {
                 if (!isProcessing && isAutoScanActive) performScan(true);
             }, AUTO_SCAN_INTERVAL_MS);
         } else {
-            clearInterval(autoScanTimer);
-            autoScanTimer = null;
-            lastAutoAdd = { value: null, at: 0 };
-            setAutoScanUi(false);
-            showNotification('دۆخی خۆکار ناچالاک کرا');
+            lastAutoAdd = { value: null };
+            if (announce) showNotification('خوێندنەوەی خۆکار ناچالاک کرا');
         }
+    }
+
+    function toggleAutoScan() {
+        setAutoScan(!isAutoScanActive, true);
     }
 
     // ---------- Reset ----------
@@ -586,6 +665,7 @@
         if (!confirmed) return;
 
         items = [];
+        lastAutoAdd = { value: null };
         persist();
         renderList();
         updateCalculations();
@@ -690,5 +770,11 @@
         navigator.serviceWorker.register('./sw.js').catch(() => {});
     }
 
-    window.setTimeout(() => startCamera(false), 350);
+    window.setTimeout(() => {
+        if (autoScanPref) {
+            setAutoScan(true, false);
+        } else {
+            startCamera(false);
+        }
+    }, 350);
 })();

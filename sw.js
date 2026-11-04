@@ -1,4 +1,4 @@
-const VERSION = 'v1';
+const VERSION = 'v3';
 const APP_CACHE = `scanner-app-${VERSION}`;
 const RUNTIME_CACHE = `scanner-runtime-${VERSION}`;
 
@@ -6,6 +6,7 @@ const APP_SHELL = [
     './',
     './index.html',
     './app.js',
+    './ocr-utils.js',
     './manifest.webmanifest',
     './assets/app.css',
     './assets/fonts/vazirmatn-arabic.woff2',
