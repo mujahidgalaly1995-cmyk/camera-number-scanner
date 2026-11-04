@@ -1,6 +1,15 @@
-const VERSION = 'v4';
+const VERSION = 'v5';
 const APP_CACHE = `scanner-app-${VERSION}`;
 const RUNTIME_CACHE = `scanner-runtime-${VERSION}`;
+const VENDOR_CACHE = 'scanner-vendor-v1';
+
+const VENDOR_ASSETS = [
+    './assets/vendor/tesseract/tesseract.min.js',
+    './assets/vendor/tesseract/worker.min.js',
+    './assets/vendor/tesseract/tesseract-core-simd-lstm.wasm.js',
+    './assets/vendor/tesseract/tesseract-core-lstm.wasm.js',
+    './assets/tessdata/eng.traineddata.gz',
+];
 
 const APP_SHELL = [
     './',
@@ -24,7 +33,22 @@ const APP_SHELL = [
 
 self.addEventListener('install', (event) => {
     event.waitUntil(
-        caches.open(APP_CACHE).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting())
+        (async () => {
+            const appCache = await caches.open(APP_CACHE);
+            await appCache.addAll(APP_SHELL);
+
+            // OCR engine and language model rarely change; cache them once so
+            // later versions do not download several megabytes again.
+            try {
+                const vendorCache = await caches.open(VENDOR_CACHE);
+                const cached = await vendorCache.keys();
+                if (!cached.length) await vendorCache.addAll(VENDOR_ASSETS);
+            } catch (err) {
+                // The files are cached on first OCR run instead.
+            }
+
+            await self.skipWaiting();
+        })()
     );
 });
 
@@ -35,7 +59,7 @@ self.addEventListener('activate', (event) => {
             .then((keys) =>
                 Promise.all(
                     keys
-                        .filter((key) => key !== APP_CACHE && key !== RUNTIME_CACHE)
+                        .filter((key) => key !== APP_CACHE && key !== RUNTIME_CACHE && key !== VENDOR_CACHE)
                         .map((key) => caches.delete(key))
                 )
             )
