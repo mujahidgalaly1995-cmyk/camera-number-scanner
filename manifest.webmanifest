@@ -1,0 +1,40 @@
+{
+    "name": "سکانەر و کۆکەرەوەی ژمارەکان",
+    "short_name": "سکانەر",
+    "description": "سکانکردنی ژمارەکان بە کامێرا، کۆکردنەوە و کۆی گشتی",
+    "lang": "ckb",
+    "dir": "rtl",
+    "start_url": "./",
+    "scope": "./",
+    "display": "standalone",
+    "orientation": "portrait",
+    "background_color": "#0f172a",
+    "theme_color": "#0f172a",
+    "categories": ["utilities", "productivity"],
+    "icons": [
+        {
+            "src": "assets/icons/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "assets/icons/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "assets/icons/icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "assets/icons/icon-1024.png",
+            "sizes": "1024x1024",
+            "type": "image/png",
+            "purpose": "any"
+        }
+    ]
+}

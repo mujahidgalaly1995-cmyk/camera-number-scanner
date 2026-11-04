@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+    font-family: 'Vazirmatn';
+    font-style: normal;
+    font-weight: 300 900;
+    font-display: swap;
+    src: url('fonts/vazirmatn-arabic.woff2') format('woff2');
+    unicode-range: U+0600-06FF, U+0750-077F, U+0870-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+
+@font-face {
+    font-family: 'Vazirmatn';
+    font-style: normal;
+    font-weight: 300 900;
+    font-display: swap;
+    src: url('fonts/vazirmatn-latin.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2000-206F, U+20A0-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+    color-scheme: dark;
+}
+
+html {
+    -webkit-text-size-adjust: 100%;
+    background-color: #0f172a;
+}
+
+body {
+    font-family: 'Vazirmatn', system-ui, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+    overscroll-behavior-y: none;
+}
+
+input,
+textarea {
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+/* Keep the app clear of the iPhone notch / home indicator */
+.app-header {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 0.75rem);
+}
+
+.app-footer {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
+}
+
+.app-main {
+    padding-bottom: calc(6.75rem + env(safe-area-inset-bottom, 0px));
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+
+#toast {
+    top: calc(env(safe-area-inset-top, 0px) + 4.25rem);
+}
+
+/* Viewfinder targeting crosshairs */
+.scanner-frame {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 82%;
+    height: 90px;
+    border: 2px solid rgba(99, 102, 241, 0.9);
+    box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.65);
+    border-radius: 14px;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.scanner-frame::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, #818cf8, #4f46e5, transparent);
+    animation: scanLine 2s linear infinite;
+}
+
+@keyframes scanLine {
+    0% { top: 0%; opacity: 0.2; }
+    50% { opacity: 1; }
+    100% { top: 96%; opacity: 0.2; }
+}
+
+/* Pulse glow animation for scan button */
+@keyframes pulse-ring {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.6); }
+    70% { transform: scale(1); box-shadow: 0 0 0 14px rgba(79, 70, 229, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(79, 70, 229, 0); }
+}
+.pulse-active {
+    animation: pulse-ring 2s infinite cubic-bezier(0.45, 0, 0.55, 1);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 999px;
+}
+
+/* iOS smooth list numbers */
+.tabular {
+    font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .scanner-frame::before,
+    .pulse-active {
+        animation: none;
+    }
+}
