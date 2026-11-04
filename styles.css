@@ -130,6 +130,29 @@ textarea {
     border-color: #bfe8d8;
 }
 
+/* Camera zoom switch */
+.zoom-btn {
+    width: 46px;
+    height: 34px;
+    border-radius: 9999px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 11px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.zoom-btn-on {
+    background-color: #10b981;
+    color: #ffffff;
+}
+
+#cameraVideo {
+    transform-origin: center center;
+}
+
 /* Viewfinder targeting box */
 .scanner-frame {
     position: absolute;

@@ -144,6 +144,14 @@
                     </span>
                 </div>
 
+                <!-- Zoom control -->
+                <div class="absolute bottom-3 inset-x-0 z-10 flex justify-center pointer-events-none">
+                    <div class="pointer-events-auto bg-slate-900/55 backdrop-blur rounded-full p-1 flex items-center gap-1" dir="ltr">
+                        <button type="button" data-zoom="1" class="zoom-btn zoom-btn-on">1x</button>
+                        <button type="button" data-zoom="2" class="zoom-btn">2x</button>
+                    </div>
+                </div>
+
                 <!-- OCR Processing Overlay Indicator -->
                 <div id="scanSpinner" class="hidden absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2 z-20">
                     <div class="w-9 h-9 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
@@ -172,27 +180,6 @@
                 </button>
             </div>
 
-            <!-- Candidate Recognition Card -->
-            <div id="candidateCard" class="hidden mt-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl">
-                <div class="flex items-center justify-between mb-2">
-                    <span class="text-[11px] text-emerald-800 font-bold flex items-center gap-1.5">
-                        <i class="fa-regular fa-circle-check text-emerald-600"></i>
-                        ژمارەی دۆزراوە لە وێنەکەدا:
-                    </span>
-                    <button id="closeCandidateBtn" class="w-7 h-7 rounded-full bg-white text-slate-500 hover:text-slate-800 text-xs flex items-center justify-center border border-emerald-200" aria-label="داخستن">
-                        <i class="fa-solid fa-xmark"></i>
-                    </button>
-                </div>
-                <div class="flex items-center gap-2">
-                    <div class="flex-1 bg-white border border-emerald-200 rounded-xl px-3 py-2.5 flex items-center">
-                        <input id="candidateInput" type="number" step="any" inputmode="decimal" class="w-full bg-transparent text-emerald-700 font-extrabold text-xl outline-none font-mono text-left tabular" dir="ltr" />
-                    </div>
-                    <button id="confirmCandidateBtn" class="px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-[0_6px_16px_rgba(5,150,105,0.25)] flex items-center gap-1.5 active:scale-95">
-                        <i class="fa-solid fa-plus"></i>
-                        زیادکردن
-                    </button>
-                </div>
-            </div>
         </section>
 
         <!-- Hidden canvas for image pre-processing -->

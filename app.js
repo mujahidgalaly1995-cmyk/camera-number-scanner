@@ -22,6 +22,8 @@
     let cameraBlocked = false;
     let autoScanPref = loadAutoPref();
     let searchQuery = '';
+    let zoomLevel = 1;
+    let hardwareZoom = false;
 
     // ---------- Elements ----------
     const $ = (id) => document.getElementById(id);
@@ -34,10 +36,7 @@
     const cameraPlaceholder = $('cameraPlaceholder');
     const captureScanBtn = $('captureScanBtn');
     const scanSpinner = $('scanSpinner');
-    const candidateCard = $('candidateCard');
-    const candidateInput = $('candidateInput');
-    const confirmCandidateBtn = $('confirmCandidateBtn');
-    const closeCandidateBtn = $('closeCandidateBtn');
+    const zoomButtons = Array.from(document.querySelectorAll('[data-zoom]'));
     const manualNumberInput = $('manualNumberInput');
     const manualAddBtn = $('manualAddBtn');
     const numbersListContainer = $('numbersListContainer');
@@ -178,6 +177,7 @@
         }
 
         stopCameraStream();
+        hardwareZoom = false;
 
         try {
             videoStream = await navigator.mediaDevices.getUserMedia({
@@ -190,8 +190,19 @@
             });
             video.srcObject = videoStream;
             await video.play().catch(() => {});
+            const track = videoStream.getVideoTracks()[0];
+            if (track && track.applyConstraints) {
+                track
+                    .applyConstraints({
+                        advanced: [
+                            { focusMode: 'continuous', exposureMode: 'continuous', whiteBalanceMode: 'continuous' },
+                        ],
+                    })
+                    .catch(() => {});
+            }
             cameraBlocked = false;
             cameraPlaceholder.classList.add('hidden');
+            setZoom(zoomLevel);
             if (notifyUser) showNotification('کامێرا بە سەرکەوتوویی کرایەوە', 'success');
             initTesseractWorker();
         } catch (err) {
@@ -212,6 +223,34 @@
             return;
         }
         startCamera(false);
+    }
+
+    // ---------- Zoom ----------
+    function updateZoomControls() {
+        zoomButtons.forEach((btn) => {
+            btn.classList.toggle('zoom-btn-on', Number(btn.dataset.zoom) === zoomLevel);
+        });
+    }
+
+    async function setZoom(level) {
+        zoomLevel = level;
+        hardwareZoom = false;
+        updateZoomControls();
+        video.style.transform = level > 1 ? `scale(${level})` : '';
+
+        const track = videoStream && videoStream.getVideoTracks ? videoStream.getVideoTracks()[0] : null;
+        if (!track || typeof track.getCapabilities !== 'function') return;
+
+        try {
+            const caps = track.getCapabilities();
+            if (caps.zoom && level >= caps.zoom.min && level <= caps.zoom.max) {
+                await track.applyConstraints({ advanced: [{ zoom: level }] });
+                hardwareZoom = true;
+                video.style.transform = '';
+            }
+        } catch (e) {
+            hardwareZoom = false;
+        }
     }
 
     // ---------- OCR worker ----------
@@ -246,15 +285,18 @@
     function getStripMapping() {
         if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return null;
 
-        const videoRect = video.getBoundingClientRect();
+        // The video may be CSS-scaled for digital zoom, so measure its stage
+        // instead of the transformed video box.
+        const stageRect = video.parentElement.getBoundingClientRect();
         const frameRect = viewfinder.getBoundingClientRect();
-        if (!videoRect.width || !videoRect.height) return null;
+        if (!stageRect.width || !stageRect.height) return null;
 
-        const scale = Math.max(videoRect.width / video.videoWidth, videoRect.height / video.videoHeight);
+        const digitalZoom = hardwareZoom ? 1 : zoomLevel;
+        const scale = Math.max(stageRect.width / video.videoWidth, stageRect.height / video.videoHeight) * digitalZoom;
         const mediaW = video.videoWidth * scale;
         const mediaH = video.videoHeight * scale;
-        const mediaLeft = videoRect.left + (videoRect.width - mediaW) / 2;
-        const mediaTop = videoRect.top + (videoRect.height - mediaH) / 2;
+        const mediaLeft = stageRect.left + (stageRect.width - mediaW) / 2;
+        const mediaTop = stageRect.top + (stageRect.height - mediaH) / 2;
 
         const padX = frameRect.width * 0.08;
         const padY = frameRect.height * 0.55;
@@ -464,16 +506,12 @@
                     showNotification(`ژمارەی ${formatNumber(best.candidate)} زیادکرا`, 'success');
                 } else {
                     playBeep(true);
+                    lastAutoAdd = { value: best.candidate };
+                    addNumberToList(best.candidate, 'کامێرا');
                     if (best.confidence >= MANUAL_MIN_CONFIDENCE) {
-                        lastAutoAdd = { value: best.candidate };
-                        addNumberToList(best.candidate, 'کامێرا');
-                        candidateCard.classList.add('hidden');
                         showNotification(`ژمارەی ${formatNumber(best.candidate)} زیادکرا`, 'success');
                     } else {
-                        candidateInput.value = String(best.candidate);
-                        candidateCard.classList.remove('hidden');
-                        candidateCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                        showNotification('ژمارەکە کەمێک ناڕوونە، تکایە پشکنینی بکە', 'error');
+                        showNotification(`ژمارەی ${formatNumber(best.candidate)} زیادکرا، بەڵام کەمێک ناڕوون بوو`, 'error');
                     }
                 }
             } else if (!isAuto) {
@@ -756,7 +794,6 @@
         persist();
         renderList();
         updateCalculations();
-        candidateCard.classList.add('hidden');
         showNotification('هەموو ژمارەکان پاککرانەوە');
     }
 
@@ -808,21 +845,8 @@
     });
     captureScanBtn.addEventListener('click', () => performScan(false));
     autoScanToggle.addEventListener('click', toggleAutoScan);
-
-    confirmCandidateBtn.addEventListener('click', () => {
-        const val = parseFloat(candidateInput.value);
-        if (!Number.isFinite(val) || val <= 0) {
-            showNotification('تکایە ژمارەیەکی دروست بنووسە', 'error');
-            return;
-        }
-        addNumberToList(val, 'کامێرا');
-        candidateCard.classList.add('hidden');
-        candidateInput.value = '';
-        showNotification(`ژمارەی ${formatNumber(val)} زیادکرا`, 'success');
-    });
-
-    closeCandidateBtn.addEventListener('click', () => {
-        candidateCard.classList.add('hidden');
+    zoomButtons.forEach((btn) => {
+        btn.addEventListener('click', () => setZoom(Number(btn.dataset.zoom)));
     });
 
     manualAddBtn.addEventListener('click', () => {
