@@ -21,6 +21,7 @@
     let toastTimer = null;
     let cameraBlocked = false;
     let autoScanPref = loadAutoPref();
+    let searchQuery = '';
 
     // ---------- Elements ----------
     const $ = (id) => document.getElementById(id);
@@ -32,7 +33,6 @@
     const startCameraBtn = $('startCameraBtn');
     const cameraPlaceholder = $('cameraPlaceholder');
     const captureScanBtn = $('captureScanBtn');
-    const footerScanBtn = $('footerScanBtn');
     const scanSpinner = $('scanSpinner');
     const candidateCard = $('candidateCard');
     const candidateInput = $('candidateInput');
@@ -47,7 +47,6 @@
     const avgDisplay = $('avgDisplay');
     const maxDisplay = $('maxDisplay');
     const clearAllBtn = $('clearAllBtn');
-    const footerResetBtn = $('footerResetBtn');
     const copyListBtn = $('copyListBtn');
     const exportTextBtn = $('exportTextBtn');
     const autoScanToggle = $('autoScanToggle');
@@ -58,6 +57,15 @@
     const toastIcon = $('toastIcon');
     const installHint = $('installHint');
     const dismissInstallHint = $('dismissInstallHint');
+    const headerShareBtn = $('headerShareBtn');
+    const searchInput = $('searchInput');
+    const searchCount = $('searchCount');
+    const countCardValue = $('countCardValue');
+    const lastDisplay = $('lastDisplay');
+    const manualFab = $('manualFab');
+    const manualSheet = $('manualSheet');
+    const sheetBackdrop = $('sheetBackdrop');
+    const manualCloseBtn = $('manualCloseBtn');
 
     // ---------- Persistence ----------
     function loadItems() {
@@ -133,11 +141,11 @@
     function showNotification(message, type = 'info') {
         toastMsg.textContent = message;
         if (type === 'success') {
-            toastIcon.className = 'fa-solid fa-circle-check text-emerald-400';
+            toastIcon.className = 'fa-solid fa-circle-check text-emerald-500';
         } else if (type === 'error') {
-            toastIcon.className = 'fa-solid fa-circle-exclamation text-rose-400';
+            toastIcon.className = 'fa-solid fa-circle-exclamation text-rose-500';
         } else {
-            toastIcon.className = 'fa-solid fa-circle-info text-indigo-400';
+            toastIcon.className = 'fa-solid fa-circle-info text-emerald-500';
         }
         toast.classList.remove('opacity-0', 'pointer-events-none');
         clearTimeout(toastTimer);
@@ -480,6 +488,8 @@
         const count = items.length;
         itemsCountBadge.textContent = `${count} دانە`;
         listBadge.textContent = count;
+        countCardValue.textContent = count;
+        lastDisplay.textContent = count ? formatNumber(items[0].value) : '0';
 
         if (count === 0) {
             totalSumDisplay.textContent = '0';
@@ -497,41 +507,75 @@
         maxDisplay.textContent = formatNumber(max);
     }
 
-    function renderList() {
-        if (items.length === 0) {
-            numbersListContainer.innerHTML = `
-                <div class="py-10 text-center border-2 border-dashed border-slate-800 rounded-2xl">
-                    <div class="w-12 h-12 mx-auto rounded-full bg-slate-800/70 text-slate-500 flex items-center justify-center text-xl mb-2">
-                        <i class="fa-solid fa-calculator"></i>
+    function getFilteredItems() {
+        const query = searchQuery.trim();
+        if (!query) return items;
+
+        const digits = query.replace(/[,\s]/g, '');
+        return items.filter((item) => {
+            const formatted = formatNumber(item.value);
+            return formatted.includes(query) || String(item.value).includes(digits);
+        });
+    }
+
+    function emptyStateMarkup(filteredOut) {
+        if (filteredOut) {
+            return `
+                <div class="py-10 px-5 text-center border-2 border-dashed border-[#dbe5e0] rounded-[24px]">
+                    <div class="w-14 h-14 mx-auto rounded-2xl bg-[#f2f5f4] text-[#a9b8b0] flex items-center justify-center text-2xl mb-3">
+                        <i class="fa-solid fa-magnifying-glass"></i>
                     </div>
-                    <p class="text-xs font-semibold text-slate-400">هیچ ژمارەیەک هێشتا زیاد نەکراوە</p>
-                    <p class="text-[11px] text-slate-500 mt-0.5">بە کامێرا سکان بکە یان بەدەست زیادی بکە</p>
+                    <p class="text-sm font-bold text-slate-700">هیچ ئەنجامێک نەدۆزرایەوە</p>
+                    <p class="text-[11px] text-slate-500 mt-1">ژمارەیەکی تر تاقی بکەرەوە</p>
                 </div>
             `;
+        }
+
+        return `
+            <div class="py-10 px-5 text-center border-2 border-dashed border-[#dbe5e0] rounded-[24px]">
+                <div class="w-14 h-14 mx-auto rounded-2xl bg-[#f2f5f4] text-[#a9b8b0] flex items-center justify-center text-2xl mb-3">
+                    <i class="fa-regular fa-folder-open"></i>
+                </div>
+                <p class="text-sm font-bold text-slate-700">هیچ ژمارەیەک تۆمار نەکراوە</p>
+                <p class="text-[11px] text-slate-500 mt-1 mb-4">بۆ دەستپێکردن کامێراکە بکەرەوە یان بە دەست زیاد بکە</p>
+                <button data-empty-add class="px-5 py-2.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-xs font-bold active:scale-95 transition">
+                    زیادکردنی ژمارەی نوێ
+                </button>
+            </div>
+        `;
+    }
+
+    function renderList() {
+        const visible = getFilteredItems();
+        searchCount.textContent = `${visible.length} ئەنجام`;
+        searchCount.classList.toggle('hidden', !searchQuery.trim());
+
+        if (visible.length === 0) {
+            numbersListContainer.innerHTML = emptyStateMarkup(items.length > 0);
             return;
         }
 
-        numbersListContainer.innerHTML = items
+        numbersListContainer.innerHTML = visible
             .map((item, index) => {
-                const displayIndex = items.length - index;
+                const displayIndex = visible.length - index;
                 return `
-                <div class="bg-slate-850/80 hover:bg-slate-800 border border-slate-800 rounded-xl p-3 flex items-center justify-between transition">
-                    <div class="flex items-center gap-3">
-                        <span class="w-6 h-6 rounded-lg bg-indigo-500/10 text-indigo-400 font-bold text-xs flex items-center justify-center font-mono">
+                <div class="bg-white rounded-2xl border border-[#eef1ef] px-3.5 py-3 flex items-center justify-between gap-3 shadow-[0_2px_10px_rgba(18,45,35,0.04)]">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <span class="w-8 h-8 shrink-0 rounded-xl bg-emerald-50 text-emerald-600 font-bold text-[11px] flex items-center justify-center font-mono">
                             ${displayIndex}
                         </span>
-                        <div>
-                            <div class="text-base font-extrabold text-white font-mono tracking-wide tabular" dir="ltr">
+                        <div class="min-w-0">
+                            <div class="text-[17px] font-extrabold text-slate-900 font-mono tracking-wide tabular truncate" dir="ltr">
                                 ${formatNumber(item.value)}
                             </div>
-                            <div class="text-[10px] text-slate-400 flex items-center gap-2">
+                            <div class="text-[10px] text-slate-400 flex items-center gap-2 mt-0.5">
                                 <span><i class="fa-regular fa-clock ml-1"></i>${item.time}</span>
-                                <span>•</span>
-                                <span class="text-indigo-400/90">${item.source}</span>
+                                <span class="w-1 h-1 rounded-full bg-slate-300"></span>
+                                <span class="text-emerald-600/90 font-medium">${item.source}</span>
                             </div>
                         </div>
                     </div>
-                    <button data-remove="${item.id}" class="w-8 h-8 rounded-lg bg-slate-800/80 hover:bg-rose-950/50 hover:text-rose-400 text-slate-500 flex items-center justify-center text-xs transition" aria-label="سڕینەوە">
+                    <button data-remove="${item.id}" class="w-8 h-8 shrink-0 rounded-xl bg-[#f6f8f7] hover:bg-rose-50 hover:text-rose-500 text-slate-400 flex items-center justify-center text-xs transition" aria-label="سڕینەوە">
                         <i class="fa-regular fa-trash-can"></i>
                     </button>
                 </div>
@@ -623,13 +667,13 @@
     // ---------- Auto scan ----------
     function setAutoScanUi(active) {
         if (active) {
-            autoScanDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping';
+            autoScanDot.className = 'w-2 h-2 rounded-full bg-emerald-500 animate-pulse';
             autoScanText.textContent = 'خۆکار: بەڵێ';
-            autoScanToggle.classList.add('border-emerald-500/50', 'text-emerald-300');
+            autoScanToggle.classList.add('auto-chip-on');
         } else {
-            autoScanDot.className = 'w-2.5 h-2.5 rounded-full bg-slate-500';
+            autoScanDot.className = 'w-2 h-2 rounded-full bg-slate-400';
             autoScanText.textContent = 'خۆکار: نا';
-            autoScanToggle.classList.remove('border-emerald-500/50', 'text-emerald-300');
+            autoScanToggle.classList.remove('auto-chip-on');
         }
     }
 
@@ -666,6 +710,8 @@
 
         items = [];
         lastAutoAdd = { value: null };
+        searchQuery = '';
+        searchInput.value = '';
         persist();
         renderList();
         updateCalculations();
@@ -703,13 +749,23 @@
         });
     }
 
+    // ---------- Manual add sheet ----------
+    function openManualSheet() {
+        manualSheet.classList.remove('hidden');
+        window.setTimeout(() => manualNumberInput.focus(), 120);
+    }
+
+    function closeManualSheet() {
+        manualSheet.classList.add('hidden');
+        manualNumberInput.blur();
+    }
+
     // ---------- Events ----------
     startCameraBtn.addEventListener('click', () => {
         cameraBlocked = false;
         startCamera(true);
     });
     captureScanBtn.addEventListener('click', () => performScan(false));
-    footerScanBtn.addEventListener('click', () => performScan(false));
     autoScanToggle.addEventListener('click', toggleAutoScan);
 
     confirmCandidateBtn.addEventListener('click', () => {
@@ -736,6 +792,7 @@
         }
         addNumberToList(val, 'دەستی');
         manualNumberInput.value = '';
+        closeManualSheet();
         showNotification(`ژمارەی ${formatNumber(val)} زیادکرا`, 'success');
     });
 
@@ -743,15 +800,31 @@
         if (e.key === 'Enter') manualAddBtn.click();
     });
 
+    manualFab.addEventListener('click', openManualSheet);
+    manualCloseBtn.addEventListener('click', closeManualSheet);
+    sheetBackdrop.addEventListener('click', closeManualSheet);
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !manualSheet.classList.contains('hidden')) closeManualSheet();
+    });
+
     numbersListContainer.addEventListener('click', (e) => {
-        const btn = e.target.closest('[data-remove]');
-        if (btn) removeItem(btn.getAttribute('data-remove'));
+        const removeBtn = e.target.closest('[data-remove]');
+        if (removeBtn) {
+            removeItem(removeBtn.getAttribute('data-remove'));
+            return;
+        }
+        if (e.target.closest('[data-empty-add]')) openManualSheet();
+    });
+
+    searchInput.addEventListener('input', () => {
+        searchQuery = searchInput.value;
+        renderList();
     });
 
     clearAllBtn.addEventListener('click', resetAll);
-    footerResetBtn.addEventListener('click', resetAll);
     copyListBtn.addEventListener('click', copyListToClipboard);
     exportTextBtn.addEventListener('click', shareOrExport);
+    headerShareBtn.addEventListener('click', shareOrExport);
 
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) ensureCameraRunning();

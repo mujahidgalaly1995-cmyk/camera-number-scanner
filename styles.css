@@ -21,12 +21,12 @@
 }
 
 :root {
-    color-scheme: dark;
+    color-scheme: light;
 }
 
 html {
     -webkit-text-size-adjust: 100%;
-    background-color: #0f172a;
+    background-color: #f4f6f5;
 }
 
 body {
@@ -38,6 +38,25 @@ body {
     overscroll-behavior-y: none;
 }
 
+@media (min-width: 480px) {
+    body {
+        max-width: 448px;
+        margin-left: auto;
+        margin-right: auto;
+        box-shadow: 0 0 60px rgba(16, 40, 32, 0.08);
+    }
+}
+
+.manual-fab {
+    left: 1rem;
+}
+
+@media (min-width: 480px) {
+    .manual-fab {
+        left: calc(50% - 224px + 1rem);
+    }
+}
+
 input,
 textarea {
     user-select: text;
@@ -46,24 +65,72 @@ textarea {
 
 /* Keep the app clear of the iPhone notch / home indicator */
 .app-header {
-    padding-top: calc(env(safe-area-inset-top, 0px) + 0.75rem);
-}
-
-.app-footer {
-    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
+    padding-top: calc(env(safe-area-inset-top, 0px) + 0.85rem);
 }
 
 .app-main {
-    padding-bottom: calc(6.75rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(10rem + env(safe-area-inset-bottom, 0px));
     -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
 }
 
 #toast {
-    top: calc(env(safe-area-inset-top, 0px) + 4.25rem);
+    top: calc(env(safe-area-inset-top, 0px) + 4.5rem);
 }
 
-/* Viewfinder targeting crosshairs */
+/* Summary hero card */
+.hero-card {
+    background: linear-gradient(140deg, #14ab7c 0%, #0c946b 48%, #077a57 100%);
+    box-shadow: 0 16px 34px rgba(4, 120, 87, 0.24);
+}
+
+.hero-card::before,
+.hero-card::after {
+    content: '';
+    position: absolute;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.09);
+    pointer-events: none;
+}
+
+.hero-card::before {
+    width: 190px;
+    height: 190px;
+    top: -95px;
+    left: -60px;
+}
+
+.hero-card::after {
+    width: 230px;
+    height: 230px;
+    bottom: -150px;
+    right: -70px;
+}
+
+.hero-panel {
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.stat-card {
+    box-shadow: 0 6px 18px rgba(16, 40, 32, 0.05);
+}
+
+/* Auto-scan status chip */
+.auto-chip {
+    background-color: #f2f5f4;
+    color: #64748b;
+    border: 1px solid transparent;
+}
+
+.auto-chip.auto-chip-on {
+    background-color: #e8f6f0;
+    color: #047857;
+    border-color: #bfe8d8;
+}
+
+/* Viewfinder targeting box */
 .scanner-frame {
     position: absolute;
     top: 50%;
@@ -71,8 +138,8 @@ textarea {
     transform: translate(-50%, -50%);
     width: 82%;
     height: 90px;
-    border: 2px solid rgba(99, 102, 241, 0.9);
-    box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.65);
+    border: 2px solid rgba(16, 185, 129, 0.95);
+    box-shadow: 0 0 0 9999px rgba(8, 30, 22, 0.5);
     border-radius: 14px;
     pointer-events: none;
     overflow: hidden;
@@ -85,7 +152,7 @@ textarea {
     top: 0;
     width: 100%;
     height: 3px;
-    background: linear-gradient(90deg, transparent, #818cf8, #4f46e5, transparent);
+    background: linear-gradient(90deg, transparent, #6ee7b7, #10b981, transparent);
     animation: scanLine 2s linear infinite;
 }
 
@@ -95,23 +162,13 @@ textarea {
     100% { top: 96%; opacity: 0.2; }
 }
 
-/* Pulse glow animation for scan button */
-@keyframes pulse-ring {
-    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.6); }
-    70% { transform: scale(1); box-shadow: 0 0 0 14px rgba(79, 70, 229, 0); }
-    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(79, 70, 229, 0); }
-}
-.pulse-active {
-    animation: pulse-ring 2s infinite cubic-bezier(0.45, 0, 0.55, 1);
-}
-
 /* Custom scrollbar */
 ::-webkit-scrollbar {
     width: 5px;
 }
 
 ::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
+    background: #cbd5d0;
     border-radius: 999px;
 }
 
@@ -120,9 +177,13 @@ textarea {
     font-variant-numeric: tabular-nums;
 }
 
+/* Hide native search clear button on iOS to keep the field tidy */
+input[type='search']::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
-    .scanner-frame::before,
-    .pulse-active {
+    .scanner-frame::before {
         animation: none;
     }
 }

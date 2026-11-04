@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>سکانەر و کۆکەرەوەی ژمارەکان</title>
 
-    <meta name="theme-color" content="#0f172a">
-    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#f4f6f5">
+    <meta name="color-scheme" content="light">
     <meta name="description" content="سکانکردنی ژمارەکان بە کامێرا، کۆکردنەوە و کۆی گشتی">
 
     <!-- iOS app capable -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="سکانەر">
     <meta name="format-detection" content="telephone=no">
 
@@ -27,220 +27,240 @@
     <script defer src="ocr-utils.js"></script>
     <script defer src="app.js"></script>
 </head>
-<body class="bg-slate-900 text-slate-100 min-h-[100dvh] flex flex-col justify-between max-w-md mx-auto shadow-2xl relative overflow-x-hidden border-x border-slate-800">
+<body class="bg-[#f4f6f5] text-slate-900 min-h-[100dvh] w-full relative overflow-x-hidden">
 
     <!-- Top App Bar -->
-    <header class="app-header bg-slate-900/90 backdrop-blur sticky top-0 z-30 px-4 pb-3 flex items-center justify-between border-b border-slate-800">
-        <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 text-white font-bold text-lg">
-                <i class="fa-solid fa-calculator text-base"></i>
-            </div>
-            <div>
-                <h1 class="text-base font-extrabold text-white leading-tight">سکانەر و کۆکەرەوە</h1>
-                <p class="text-xs text-indigo-400 font-medium">خوێندنەوەی ژمارە بە کامێرا</p>
-            </div>
+    <header class="app-header bg-[#f4f6f5]/95 backdrop-blur sticky top-0 z-30 px-4 pb-2 flex items-center justify-between gap-3">
+        <div>
+            <h1 class="text-[22px] font-extrabold text-slate-900 leading-tight">سیستەمی سکانەر</h1>
+            <p class="text-[11px] text-slate-500 font-medium mt-0.5">خوێندنەوەی ژمارەکان بە کامێرا</p>
         </div>
         <div class="flex items-center gap-2">
-            <div class="px-2.5 py-1 bg-indigo-500/10 border border-indigo-500/30 rounded-lg text-[11px] font-bold text-indigo-300">
-                MUJAHED GALALY
+            <button id="headerShareBtn" class="w-10 h-10 rounded-xl bg-white border border-[#e7ecea] text-slate-600 flex items-center justify-center shadow-[0_2px_8px_rgba(18,45,35,0.05)] active:scale-95 transition" aria-label="هاوبەشکردن">
+                <i class="fa-solid fa-share-nodes text-sm"></i>
+            </button>
+            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-700 text-white flex items-center justify-center text-[11px] font-extrabold shadow-[0_6px_16px_rgba(5,150,105,0.3)]">
+                MG
             </div>
         </div>
     </header>
 
     <!-- Main Content Area -->
-    <main class="app-main flex-1 overflow-y-auto">
+    <main class="app-main">
 
         <!-- One-time install hint for Safari -->
-        <div id="installHint" class="hidden mx-4 mt-3 p-3 bg-slate-800/70 border border-indigo-500/30 rounded-2xl flex items-start gap-2.5">
-            <div class="w-8 h-8 shrink-0 rounded-lg bg-indigo-500/15 text-indigo-300 flex items-center justify-center">
+        <div id="installHint" class="hidden mx-4 mt-2 p-3 bg-white border border-emerald-200 rounded-2xl flex items-start gap-2.5 shadow-[0_4px_14px_rgba(18,45,35,0.04)]">
+            <div class="w-8 h-8 shrink-0 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
                 <i class="fa-solid fa-arrow-up-from-bracket"></i>
             </div>
-            <p class="flex-1 text-[11px] leading-relaxed text-slate-300">
+            <p class="flex-1 text-[11px] leading-relaxed text-slate-600">
                 بۆ دامەزراندنی وەک ئەپ: لە Safari دوگمەی هاوبەشکردن دابگرە، پاشان
-                <span class="font-bold text-indigo-300">«Add to Home Screen»</span> هەڵبژێرە.
+                <span class="font-bold text-emerald-700">«Add to Home Screen»</span> هەڵبژێرە.
             </p>
-            <button id="dismissInstallHint" class="text-slate-400 hover:text-white text-xs p-1" aria-label="داخستن">
+            <button id="dismissInstallHint" class="text-slate-400 hover:text-slate-700 text-xs p-1" aria-label="داخستن">
                 <i class="fa-solid fa-xmark"></i>
             </button>
         </div>
 
-        <!-- Live Camera Viewport -->
-        <section class="relative w-full aspect-[4/3] bg-black overflow-hidden select-none mt-3">
-            <video id="cameraVideo" autoplay playsinline webkit-playsinline muted class="w-full h-full object-cover"></video>
-
-            <!-- Targeting Viewfinder Box -->
-            <div id="viewfinder" class="scanner-frame">
-                <div class="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-indigo-400 rounded-tr-md"></div>
-                <div class="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-indigo-400 rounded-tl-md"></div>
-                <div class="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-indigo-400 rounded-br-md"></div>
-                <div class="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-indigo-400 rounded-bl-md"></div>
-            </div>
-
-            <!-- Viewfinder Label / Hint -->
-            <div class="absolute top-3 inset-x-0 flex justify-center z-10 pointer-events-none">
-                <span class="bg-black/70 backdrop-blur text-slate-200 text-xs px-3 py-1 rounded-full border border-slate-700/80 font-medium flex items-center gap-1.5 shadow">
-                    <i class="fa-solid fa-arrows-to-eye text-indigo-400"></i>
-                    ژمارەکە لەناو چوارگۆشەکە دابنێ
+        <!-- Summary Hero Card -->
+        <section class="mx-4 mt-3 hero-card rounded-[26px] p-5 relative overflow-hidden">
+            <div class="flex items-center justify-between">
+                <span class="text-[12px] font-semibold text-white/85 flex items-center gap-1.5">
+                    <i class="fa-solid fa-wallet text-white/80"></i>
+                    کۆی گشتی ژمارەکان
                 </span>
+                <span id="itemsCountBadge" class="text-[11px] bg-white/15 border border-white/25 text-white px-2.5 py-1 rounded-full font-semibold">0 دانە</span>
             </div>
 
-            <!-- OCR Processing Overlay Indicator -->
-            <div id="scanSpinner" class="hidden absolute inset-0 bg-slate-950/70 backdrop-blur-sm flex flex-col items-center justify-center gap-2 z-20">
-                <div class="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                <span class="text-xs text-indigo-200 font-medium">سەرقاڵی دەرهێنانی ژمارەیە...</span>
+            <div class="mt-2 mb-4">
+                <span id="totalSumDisplay" class="block text-[38px] leading-none font-extrabold text-white font-mono tracking-tight tabular text-right" dir="ltr">0</span>
             </div>
 
-            <!-- Camera Inactive / Permission Prompt -->
-            <div id="cameraPlaceholder" class="absolute inset-0 bg-slate-900 flex flex-col items-center justify-center p-6 text-center z-10">
-                <div class="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 text-2xl mb-3">
-                    <i class="fa-solid fa-camera"></i>
+            <div class="grid grid-cols-2 gap-3">
+                <div class="hero-panel rounded-2xl p-3.5">
+                    <span class="text-[11px] text-white/80 font-medium">تێکڕا</span>
+                    <p id="avgDisplay" class="text-xl font-extrabold text-white font-mono mt-1 tabular" dir="ltr">0</p>
                 </div>
-                <p class="text-sm font-semibold text-slate-200 mb-1">کامێرا ناچالاکە</p>
-                <p class="text-xs text-slate-400 mb-4 max-w-xs">بۆ ئەوەی ژمارەکان بخوێنرێنەوە، تکایە ڕێگە بە دەستگەیشتنی کامێرا بدە</p>
-                <button id="startCameraBtn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/30 flex items-center gap-2 transition active:scale-95">
-                    <i class="fa-solid fa-power-off"></i>
-                    کردنەوەی کامێرا
+                <div class="hero-panel rounded-2xl p-3.5">
+                    <span class="text-[11px] text-white/80 font-medium">گەورەترین</span>
+                    <p id="maxDisplay" class="text-xl font-extrabold text-white font-mono mt-1 tabular" dir="ltr">0</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Stat Cards -->
+        <section class="mx-4 mt-3 grid grid-cols-2 gap-3">
+            <div class="stat-card bg-white rounded-2xl px-4 py-3.5 flex items-center justify-between gap-2">
+                <div class="min-w-0">
+                    <p class="text-[11px] text-slate-500 font-medium">کۆی تۆمارەکان</p>
+                    <p id="countCardValue" class="text-xl font-extrabold text-slate-900 mt-0.5 tabular">0</p>
+                </div>
+                <div class="w-10 h-10 shrink-0 rounded-xl bg-[#eef0fb] text-indigo-500 flex items-center justify-center">
+                    <i class="fa-solid fa-list-ul"></i>
+                </div>
+            </div>
+            <div class="stat-card bg-white rounded-2xl px-4 py-3.5 flex items-center justify-between gap-2">
+                <div class="min-w-0">
+                    <p class="text-[11px] text-slate-500 font-medium">دوایین ژمارە</p>
+                    <p id="lastDisplay" class="text-xl font-extrabold text-slate-900 mt-0.5 font-mono tabular truncate" dir="ltr">0</p>
+                </div>
+                <div class="w-10 h-10 shrink-0 rounded-xl bg-[#e8f6f0] text-emerald-600 flex items-center justify-center">
+                    <i class="fa-solid fa-circle-check"></i>
+                </div>
+            </div>
+        </section>
+
+        <!-- Camera Scanner Card -->
+        <section class="mx-4 mt-4 bg-white rounded-[26px] p-3 shadow-[0_10px_30px_rgba(16,40,32,0.06)]">
+            <div class="flex items-center justify-between px-1.5 pt-1 pb-2.5">
+                <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-xs">
+                        <i class="fa-solid fa-camera"></i>
+                    </div>
+                    <h2 class="text-sm font-bold text-slate-800">سکانەری کامێرا</h2>
+                </div>
+                <button id="autoScanToggle" class="auto-chip px-3 py-1.5 rounded-full text-[11px] font-bold flex items-center gap-1.5 transition">
+                    <span class="w-2 h-2 rounded-full bg-slate-400" id="autoScanDot"></span>
+                    <span id="autoScanText">خۆکار: نا</span>
                 </button>
+            </div>
+
+            <div class="relative w-full aspect-[4/3] bg-slate-100 rounded-[20px] overflow-hidden select-none">
+                <video id="cameraVideo" autoplay playsinline webkit-playsinline muted class="w-full h-full object-cover"></video>
+
+                <!-- Targeting Viewfinder Box -->
+                <div id="viewfinder" class="scanner-frame">
+                    <div class="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-emerald-300 rounded-tr-md"></div>
+                    <div class="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-emerald-300 rounded-tl-md"></div>
+                    <div class="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-emerald-300 rounded-br-md"></div>
+                    <div class="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-emerald-300 rounded-bl-md"></div>
+                </div>
+
+                <!-- Viewfinder Label / Hint -->
+                <div class="absolute top-3 inset-x-0 flex justify-center z-10 pointer-events-none">
+                    <span class="bg-slate-900/60 backdrop-blur text-white text-[11px] px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow">
+                        <i class="fa-solid fa-arrows-to-eye text-emerald-300"></i>
+                        ژمارەکە لەناو چوارگۆشەکە دابنێ
+                    </span>
+                </div>
+
+                <!-- OCR Processing Overlay Indicator -->
+                <div id="scanSpinner" class="hidden absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2 z-20">
+                    <div class="w-9 h-9 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span class="text-[11px] text-emerald-700 font-semibold">سەرقاڵی دەرهێنانی ژمارەیە...</span>
+                </div>
+
+                <!-- Camera Inactive / Permission Prompt -->
+                <div id="cameraPlaceholder" class="absolute inset-0 bg-[#f7faf8] flex flex-col items-center justify-center p-6 text-center z-10">
+                    <div class="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 text-xl mb-3">
+                        <i class="fa-solid fa-camera"></i>
+                    </div>
+                    <p class="text-sm font-bold text-slate-800 mb-1">کامێرا ناچالاکە</p>
+                    <p class="text-[11px] text-slate-500 mb-4 max-w-xs leading-relaxed">بۆ ئەوەی ژمارەکان بخوێنرێنەوە، تکایە ڕێگە بە دەستگەیشتنی کامێرا بدە</p>
+                    <button id="startCameraBtn" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-[0_8px_20px_rgba(5,150,105,0.25)] flex items-center gap-2 transition active:scale-95">
+                        <i class="fa-solid fa-power-off"></i>
+                        کردنەوەی کامێرا
+                    </button>
+                </div>
+            </div>
+
+            <!-- Scan Action -->
+            <div class="pt-3">
+                <button id="captureScanBtn" class="w-full py-3.5 px-4 bg-gradient-to-l from-emerald-600 to-emerald-500 text-white rounded-2xl font-bold text-sm shadow-[0_10px_24px_rgba(5,150,105,0.28)] flex items-center justify-center gap-2 transition active:scale-[0.98]">
+                    <i class="fa-solid fa-barcode text-base"></i>
+                    <span>سکانکردن (بخوێنەوە)</span>
+                </button>
+            </div>
+
+            <!-- Candidate Recognition Card -->
+            <div id="candidateCard" class="hidden mt-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-[11px] text-emerald-800 font-bold flex items-center gap-1.5">
+                        <i class="fa-regular fa-circle-check text-emerald-600"></i>
+                        ژمارەی دۆزراوە لە وێنەکەدا:
+                    </span>
+                    <button id="closeCandidateBtn" class="w-7 h-7 rounded-full bg-white text-slate-500 hover:text-slate-800 text-xs flex items-center justify-center border border-emerald-200" aria-label="داخستن">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <div class="flex-1 bg-white border border-emerald-200 rounded-xl px-3 py-2.5 flex items-center">
+                        <input id="candidateInput" type="number" step="any" inputmode="decimal" class="w-full bg-transparent text-emerald-700 font-extrabold text-xl outline-none font-mono text-left tabular" dir="ltr" />
+                    </div>
+                    <button id="confirmCandidateBtn" class="px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-[0_6px_16px_rgba(5,150,105,0.25)] flex items-center gap-1.5 active:scale-95">
+                        <i class="fa-solid fa-plus"></i>
+                        زیادکردن
+                    </button>
+                </div>
             </div>
         </section>
 
         <!-- Hidden canvas for image pre-processing -->
         <canvas id="cropCanvas" class="hidden"></canvas>
 
-        <!-- Quick Scan Controls -->
-        <div class="p-4 bg-slate-900 border-b border-slate-800 flex items-center justify-between gap-3">
-            <button id="captureScanBtn" class="flex-1 py-3 px-4 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition active:scale-95">
-                <i class="fa-solid fa-barcode text-base"></i>
-                <span>سکانکردن (بخوێنەوە)</span>
-            </button>
-
-            <button id="autoScanToggle" class="px-3.5 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-300 flex items-center gap-1.5 transition">
-                <span class="w-2.5 h-2.5 rounded-full bg-slate-500" id="autoScanDot"></span>
-                <span id="autoScanText">خۆکار: نا</span>
-            </button>
-        </div>
-
-        <!-- Candidate Recognition Modal / Alert Box -->
-        <div id="candidateCard" class="hidden mx-4 mt-3 p-3.5 bg-indigo-950/80 border border-indigo-500/40 rounded-2xl shadow-xl backdrop-blur transition-all">
-            <div class="flex items-center justify-between mb-2">
-                <span class="text-xs text-indigo-300 font-semibold flex items-center gap-1.5">
-                    <i class="fa-regular fa-circle-check text-emerald-400"></i>
-                    ژمارەی دۆزراوە لە وێنەکەدا:
-                </span>
-                <button id="closeCandidateBtn" class="text-slate-400 hover:text-white text-xs p-1" aria-label="داخستن">
-                    <i class="fa-solid fa-xmark"></i>
-                </button>
+        <!-- Search -->
+        <section class="mx-4 mt-4">
+            <div class="relative">
+                <i class="fa-solid fa-magnifying-glass absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none"></i>
+                <input id="searchInput" type="search" inputmode="numeric" placeholder="گەڕان بەدوای ژمارە..." class="w-full bg-white border border-[#e7ecea] rounded-2xl pr-11 pl-4 py-3 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition" />
             </div>
-            <div class="flex items-center gap-2">
-                <div class="flex-1 bg-slate-900/90 border border-indigo-500/30 rounded-xl px-3 py-2 flex items-center">
-                    <input id="candidateInput" type="number" step="any" inputmode="decimal" class="w-full bg-transparent text-emerald-400 font-bold text-xl outline-none font-mono text-left" dir="ltr" />
-                </div>
-                <button id="confirmCandidateBtn" class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 flex items-center gap-1.5 active:scale-95">
-                    <i class="fa-solid fa-plus"></i>
-                    زیادکردن
-                </button>
-            </div>
-        </div>
-
-        <!-- Manual Input Section -->
-        <div class="px-4 mt-3">
-            <div class="bg-slate-850/60 p-3 rounded-2xl border border-slate-800 flex items-center gap-2">
-                <div class="relative flex-1">
-                    <input id="manualNumberInput" type="number" step="any" inputmode="decimal" placeholder="یان ژمارە بە دەست لێرە بنووسە..." class="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-indigo-500 text-left" dir="ltr" />
-                </div>
-                <button id="manualAddBtn" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-indigo-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition active:scale-95">
-                    <i class="fa-solid fa-plus"></i>
-                    زیادکردن
-                </button>
-            </div>
-        </div>
-
-        <!-- Summary & Calculation Stats Card -->
-        <div class="px-4 mt-4">
-            <div class="bg-gradient-to-br from-indigo-950 via-slate-900 to-slate-900 border border-indigo-500/30 rounded-2xl p-4 shadow-xl relative overflow-hidden">
-                <div class="absolute -right-8 -bottom-8 w-28 h-28 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none"></div>
-
-                <div class="flex items-center justify-between mb-2">
-                    <span class="text-xs font-bold uppercase tracking-wider text-indigo-300">پوختەی ئەنجام (TOTAL)</span>
-                    <span id="itemsCountBadge" class="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/30 font-medium">0 دانە</span>
-                </div>
-
-                <div class="mb-3">
-                    <p class="text-xs text-slate-400">کۆی گشتی هەموو ژمارەکان:</p>
-                    <div class="flex items-baseline justify-between gap-2 mt-1">
-                        <span id="totalSumDisplay" class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-indigo-100 to-indigo-300 font-mono tracking-tight" dir="ltr">0</span>
-                    </div>
-                </div>
-
-                <!-- Average & Minor Stats -->
-                <div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/80 text-xs">
-                    <div>
-                        <span class="text-slate-400">تێکڕا (Average):</span>
-                        <p id="avgDisplay" class="font-bold text-slate-200 font-mono mt-0.5" dir="ltr">0</p>
-                    </div>
-                    <div>
-                        <span class="text-slate-400">گەورەترین ژمارە:</span>
-                        <p id="maxDisplay" class="font-bold text-slate-200 font-mono mt-0.5" dir="ltr">0</p>
-                    </div>
-                </div>
-            </div>
-        </div>
+            <p id="searchCount" class="hidden text-[11px] font-semibold text-slate-500 mt-1.5 px-1.5 text-start">0 ئەنجام</p>
+        </section>
 
         <!-- List Section -->
-        <div class="px-4 mt-5">
+        <section class="mx-4 mt-4">
             <div class="flex items-center justify-between mb-2.5">
                 <div class="flex items-center gap-2">
-                    <h2 class="text-sm font-bold text-slate-200">لیستی ژمارە زیادکراوەکان</h2>
-                    <span id="listBadge" class="text-[11px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full">0</span>
+                    <h2 class="text-sm font-bold text-slate-800">لیستی ژمارەکان</h2>
+                    <span id="listBadge" class="text-[11px] bg-white border border-[#e7ecea] text-slate-500 px-2 py-0.5 rounded-full font-semibold">0</span>
                 </div>
                 <div class="flex items-center gap-1.5">
-                    <button id="copyListBtn" class="text-[11px] px-2.5 py-1 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-lg border border-slate-700/80 flex items-center gap-1 transition">
+                    <button id="copyListBtn" class="w-9 h-9 rounded-xl bg-white border border-[#e7ecea] text-slate-500 hover:text-emerald-600 flex items-center justify-center text-xs shadow-[0_2px_8px_rgba(18,45,35,0.04)] transition" aria-label="کۆپیکردن">
                         <i class="fa-regular fa-copy"></i>
-                        کۆپیکردن
                     </button>
-                    <button id="clearAllBtn" class="text-[11px] px-2.5 py-1 bg-rose-950/40 hover:bg-rose-900/40 text-rose-300 rounded-lg border border-rose-500/30 flex items-center gap-1 transition">
+                    <button id="exportTextBtn" class="w-9 h-9 rounded-xl bg-white border border-[#e7ecea] text-slate-500 hover:text-emerald-600 flex items-center justify-center text-xs shadow-[0_2px_8px_rgba(18,45,35,0.04)] transition" aria-label="هاوبەشکردن">
+                        <i class="fa-solid fa-share-nodes"></i>
+                    </button>
+                    <button id="clearAllBtn" class="w-9 h-9 rounded-xl bg-white border border-[#e7ecea] text-slate-500 hover:text-rose-500 flex items-center justify-center text-xs shadow-[0_2px_8px_rgba(18,45,35,0.04)] transition" aria-label="سڕینەوەی هەموو">
                         <i class="fa-regular fa-trash-can"></i>
-                        سڕینەوە
                     </button>
                 </div>
             </div>
 
-            <!-- Dynamic Items Container -->
-            <div id="numbersListContainer" class="space-y-2">
-                <!-- Empty state shown by default -->
-                <div id="emptyState" class="py-10 text-center border-2 border-dashed border-slate-800 rounded-2xl">
-                    <div class="w-12 h-12 mx-auto rounded-full bg-slate-800/70 text-slate-500 flex items-center justify-center text-xl mb-2">
-                        <i class="fa-solid fa-calculator"></i>
-                    </div>
-                    <p class="text-xs font-semibold text-slate-400">هیچ ژمارەیەک هێشتا زیاد نەکراوە</p>
-                    <p class="text-[11px] text-slate-500 mt-0.5">بە کامێرا سکان بکە یان بەدەست زیادی بکە</p>
-                </div>
-            </div>
-        </div>
+            <!-- Dynamic Items Container (empty state rendered by app.js) -->
+            <div id="numbersListContainer" class="space-y-2.5"></div>
+        </section>
 
     </main>
 
-    <!-- Bottom Action Bar -->
-    <footer class="app-footer fixed bottom-0 left-1/2 -translate-x-1/2 max-w-md w-full bg-slate-900/95 backdrop-blur border-t border-slate-800 px-3 pt-3 flex items-center justify-around z-30">
-        <button id="footerResetBtn" class="flex flex-col items-center text-slate-400 hover:text-rose-400 transition text-[11px] font-medium gap-1">
-            <i class="fa-solid fa-arrows-rotate text-sm"></i>
-            <span>نوێکردنەوە</span>
-        </button>
+    <!-- Floating Add Button -->
+    <button id="manualFab" class="manual-fab fixed bottom-[calc(env(safe-area-inset-bottom,0px)+1.1rem)] z-40 w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-700 text-white text-2xl flex items-center justify-center shadow-[0_14px_30px_rgba(5,150,105,0.35)] active:scale-90 transition" aria-label="زیادکردنی ژمارە بە دەست">
+        <i class="fa-solid fa-plus"></i>
+    </button>
 
-        <button id="footerScanBtn" class="w-14 h-14 -mt-7 rounded-full bg-gradient-to-tr from-indigo-600 to-indigo-500 text-white shadow-xl shadow-indigo-600/40 flex items-center justify-center text-xl active:scale-90 transition border-4 border-slate-900">
-            <i class="fa-solid fa-camera"></i>
-        </button>
-
-        <button id="exportTextBtn" class="flex flex-col items-center text-slate-400 hover:text-indigo-400 transition text-[11px] font-medium gap-1">
-            <i class="fa-solid fa-share-nodes text-sm"></i>
-            <span>هاوبەشکردن</span>
-        </button>
-    </footer>
+    <!-- Manual Add Sheet -->
+    <div id="manualSheet" class="hidden fixed inset-0 z-50">
+        <div id="sheetBackdrop" class="absolute inset-0 bg-slate-900/35 backdrop-blur-[2px]"></div>
+        <div class="absolute bottom-0 inset-x-0 mx-auto max-w-md bg-white rounded-t-[28px] px-5 pt-3 pb-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] shadow-[0_-10px_40px_rgba(16,40,32,0.15)]">
+            <div class="w-10 h-1 rounded-full bg-slate-200 mx-auto mb-4"></div>
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-base font-extrabold text-slate-900">زیادکردنی ژمارە بە دەست</h3>
+                <button id="manualCloseBtn" class="w-8 h-8 rounded-full bg-[#f2f5f4] text-slate-500 flex items-center justify-center text-xs" aria-label="داخستن">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <input id="manualNumberInput" type="number" step="any" inputmode="decimal" placeholder="ژمارەکە بنووسە..." class="w-full bg-[#f7faf9] border border-[#e3eae7] rounded-2xl px-4 py-4 text-2xl font-extrabold text-slate-900 placeholder-slate-400 placeholder:text-base placeholder:font-medium outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 text-center font-mono tabular" dir="ltr" />
+            <button id="manualAddBtn" class="w-full mt-3 py-3.5 bg-gradient-to-l from-emerald-600 to-emerald-500 text-white rounded-2xl font-bold text-sm shadow-[0_10px_24px_rgba(5,150,105,0.28)] flex items-center justify-center gap-2 active:scale-[0.98] transition">
+                <i class="fa-solid fa-plus"></i>
+                زیادکردن بۆ لیست
+            </button>
+        </div>
+    </div>
 
     <!-- Notification Toast Message Box -->
-    <div id="toast" class="fixed left-1/2 -translate-x-1/2 bg-slate-800/95 text-white border border-slate-700 text-xs py-2 px-4 rounded-xl shadow-2xl backdrop-blur transition-all duration-300 opacity-0 pointer-events-none z-50 flex items-center gap-2 max-w-[90vw]">
-        <i id="toastIcon" class="fa-solid fa-circle-info text-indigo-400"></i>
-        <span id="toastMsg">پەیام</span>
+    <div id="toast" class="fixed top-[calc(env(safe-area-inset-top,0px)+4.5rem)] left-1/2 -translate-x-1/2 bg-white text-slate-800 border border-[#e7ecea] text-xs py-2.5 px-4 rounded-2xl shadow-[0_12px_30px_rgba(16,40,32,0.14)] transition-all duration-300 opacity-0 pointer-events-none z-[60] flex items-center gap-2 max-w-[90vw]">
+        <i id="toastIcon" class="fa-solid fa-circle-info text-emerald-500"></i>
+        <span id="toastMsg" class="font-medium">پەیام</span>
     </div>
 
 </body>
