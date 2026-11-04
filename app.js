@@ -7,6 +7,7 @@
     const AUTO_SCAN_INTERVAL_MS = 1000;
     const AUTO_MIN_CONFIDENCE = 55;
     const MANUAL_MIN_CONFIDENCE = 55;
+    const MIN_READ_CONFIDENCE = 40;
 
     // ---------- State ----------
     let items = loadItems();
@@ -19,6 +20,7 @@
     let audioCtx = null;
     let lastAutoAdd = { value: null };
     let autoMisses = 0;
+    let manualQueued = false;
     let toastTimer = null;
     let cameraBlocked = false;
     let autoScanPref = loadAutoPref();
@@ -380,23 +382,15 @@
 
         const { sx, sy, sw, sh } = square;
 
-        // Scan a little beyond the square. A number that runs past the square
-        // is detected here and rejected instead of being read partially.
-        const extraX = Math.max(12, sw * 0.2);
-        const extraY = Math.max(12, sh * 0.6);
-        const ax = Math.max(0, sx - extraX);
-        const ay = Math.max(0, sy - extraY);
-        const areaW = Math.min(video.videoWidth, sx + sw + extraX) - ax;
-        const areaH = Math.min(video.videoHeight, sy + sh + extraY) - ay;
-        if (areaW < 8 || areaH < 8) return null;
-
-        const analysisScale = Math.min(1, 900 / areaW);
-        const aw = Math.max(1, Math.round(areaW * analysisScale));
-        const ah = Math.max(1, Math.round(areaH * analysisScale));
+        // Analyze exactly the square. Keeping the analysis small keeps the
+        // local-threshold window tight enough for faint printed digits.
+        const analysisScale = Math.min(1, 900 / sw);
+        const aw = Math.max(1, Math.round(sw * analysisScale));
+        const ah = Math.max(1, Math.round(sh * analysisScale));
 
         analysisCanvas.width = aw;
         analysisCanvas.height = ah;
-        analysisCtx.drawImage(video, ax, ay, areaW, areaH, 0, 0, aw, ah);
+        analysisCtx.drawImage(video, sx, sy, sw, sh, 0, 0, aw, ah);
 
         const analysisData = analysisCtx.getImageData(0, 0, aw, ah).data;
         const totalPixels = aw * ah;
@@ -408,40 +402,51 @@
 
         const binary = ScannerOCR.adaptiveBinarize(gray, aw, ah);
         const region = ScannerOCR.findTextRegion(binary, aw, ah);
-        if (!region) return null;
 
         const inverseScale = 1 / analysisScale;
-        const rx = ax + region.left * inverseScale;
-        const ry = ay + region.top * inverseScale;
-        const rw = region.width * inverseScale;
-        const rh = region.height * inverseScale;
+        let cropX = sx;
+        let cropY = sy;
+        let cropW = sw;
+        let cropH = sh;
+        let upscale = Math.min(2.5, Math.max(1.5, 900 / Math.max(1, sw)));
 
-        // The whole number must sit inside the square with a small breathing
-        // margin, otherwise it is skipped and the user is asked to aim again.
-        const insetX = Math.max(2, sw * 0.02);
-        const insetY = Math.max(2, sh * 0.03);
-        const fullyInside =
-            rx >= sx + insetX &&
-            ry >= sy + insetY &&
-            rx + rw <= sx + sw - insetX &&
-            ry + rh <= sy + sh - insetY;
-        if (!fullyInside) return null;
+        if (region) {
+            // Reject only when the line actually reaches the border, which
+            // means the square is cutting the number off.
+            const crossesBorder =
+                region.left <= 1 ||
+                region.top <= 1 ||
+                region.left + region.width >= aw - 1 ||
+                region.top + region.height >= ah - 1;
+            if (crossesBorder) return null;
 
-        // Crop around the line, clamped to the square so nothing outside it
-        // can end up in the OCR image.
-        const padX = Math.max(4, rw * 0.14);
-        const padY = Math.max(4, rh * 0.5);
-        const cropX = Math.max(sx, rx - padX);
-        const cropY = Math.max(sy, ry - padY);
-        const cropRight = Math.min(sx + sw, rx + rw + padX);
-        const cropBottom = Math.min(sy + sh, ry + rh + padY);
-        const cropW = cropRight - cropX;
-        const cropH = cropBottom - cropY;
+            const padXp = Math.max(8, Math.round(region.width * 0.14));
+            const padYp = Math.max(8, Math.round(region.height * 0.5));
+            const rx = Math.max(0, region.left - padXp);
+            const ry = Math.max(0, region.top - padYp);
+            const rw = Math.min(aw, region.left + region.width + padXp) - rx;
+            const rh = Math.min(ah, region.top + region.height + padYp) - ry;
+
+            cropX = sx + rx * inverseScale;
+            cropY = sy + ry * inverseScale;
+            cropW = rw * inverseScale;
+            cropH = rh * inverseScale;
+
+            const regionVideoHeight = region.height * inverseScale;
+            upscale = Math.min(6, Math.max(2, 60 / Math.max(1, regionVideoHeight)));
+        }
+
+        // Never include anything outside the square in the OCR image.
+        const cropRight = Math.min(sx + sw, cropX + cropW);
+        const cropBottom = Math.min(sy + sh, cropY + cropH);
+        cropX = Math.max(sx, cropX);
+        cropY = Math.max(sy, cropY);
+        cropW = cropRight - cropX;
+        cropH = cropBottom - cropY;
         if (cropW < 8 || cropH < 8) return null;
 
         // Keep the line near 1000px wide: enough detail for Tesseract without
         // wasting time on oversized images.
-        let upscale = Math.min(6, Math.max(2, 60 / Math.max(1, rh)));
         upscale = Math.min(upscale, 1000 / Math.max(1, cropW));
         const outW = Math.max(1, Math.round(cropW * upscale));
         const outH = Math.max(1, Math.round(cropH * upscale));
@@ -475,12 +480,14 @@
     }
 
     async function recognizeFrame(worker, image) {
-        const result = await worker.recognize(image, {}, {
-            text: true,
-            blocks: false,
-            hocr: false,
-            tsv: false,
-        });
+        const outputs = { text: true, blocks: false, hocr: false, tsv: false };
+        let result;
+        try {
+            result = await worker.recognize(image, {}, outputs);
+        } catch (err) {
+            // Some iOS builds reject canvas input; a PNG data URL always works.
+            result = await worker.recognize(image.toDataURL('image/png'));
+        }
         const data = (result && result.data) || {};
         const candidate = parseNumberFromOCR(data.text || '');
         const confidence = typeof data.confidence === 'number' ? data.confidence : 0;
@@ -517,7 +524,7 @@
                 if (!image) continue;
 
                 const result = await recognizeFrame(worker, image);
-                if (result.candidate !== null && (!best || result.confidence > best.confidence)) {
+                if (result.candidate !== null && result.confidence >= MIN_READ_CONFIDENCE && (!best || result.confidence > best.confidence)) {
                     best = result;
                 }
                 if (best && best.confidence >= MANUAL_MIN_CONFIDENCE) break;
@@ -567,7 +574,20 @@
         } finally {
             isProcessing = false;
             scanSpinner.classList.add('hidden');
+            if (manualQueued) {
+                manualQueued = false;
+                performScan(false);
+            }
         }
+    }
+
+    function requestManualScan() {
+        // Never drop a tap while the auto scanner is busy; run it right after.
+        if (isProcessing) {
+            manualQueued = true;
+            return;
+        }
+        performScan(false);
     }
 
     // ---------- List & calculations ----------
@@ -884,7 +904,7 @@
         cameraBlocked = false;
         startCamera(true);
     });
-    captureScanBtn.addEventListener('click', () => performScan(false));
+    captureScanBtn.addEventListener('click', requestManualScan);
     autoScanToggle.addEventListener('click', toggleAutoScan);
     zoomButtons.forEach((btn) => {
         btn.addEventListener('click', () => setZoom(Number(btn.dataset.zoom)));
