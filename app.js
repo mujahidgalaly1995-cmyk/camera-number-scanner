@@ -116,6 +116,36 @@
     }
 
     // ---------- Sound & haptics ----------
+    function playClickSound() {
+        try {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            if (!audioCtx) audioCtx = new Ctx();
+
+            const play = () => {
+                const now = audioCtx.currentTime;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(1320, now);
+                gain.gain.setValueAtTime(0.0001, now);
+                gain.gain.exponentialRampToValueAtTime(0.16, now + 0.008);
+                gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
+                osc.connect(gain).connect(audioCtx.destination);
+                osc.start(now);
+                osc.stop(now + 0.08);
+            };
+
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume().then(play).catch(() => {});
+            } else {
+                play();
+            }
+        } catch (e) {
+            // Audio can be blocked before the first user gesture.
+        }
+    }
+
     function playBeep(success = true) {
         try {
             const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -582,6 +612,7 @@
     }
 
     function requestManualScan() {
+        playClickSound();
         // Never drop a tap while the auto scanner is busy; run it right after.
         if (isProcessing) {
             manualQueued = true;
