@@ -4,7 +4,7 @@
     const STORAGE_KEY = 'mujahid-scanner-items-v1';
     const HINT_KEY = 'mujahid-scanner-install-hint';
     const AUTO_PREF_KEY = 'mujahid-scanner-auto';
-    const AUTO_SCAN_INTERVAL_MS = 1200;
+    const AUTO_SCAN_INTERVAL_MS = 1000;
     const AUTO_MIN_CONFIDENCE = 55;
     const MANUAL_MIN_CONFIDENCE = 55;
 
@@ -321,13 +321,10 @@
         const mediaLeft = stageRect.left + (stageRect.width - mediaW) / 2;
         const mediaTop = stageRect.top + (stageRect.height - mediaH) / 2;
 
-        const padX = Math.max(4, frameRect.width * 0.03);
-        const padY = Math.max(6, frameRect.height * 0.15);
-
-        let sx = (frameRect.left - padX - mediaLeft) / scale;
-        let sy = (frameRect.top - padY - mediaTop) / scale;
-        let sw = (frameRect.width + padX * 2) / scale;
-        let sh = (frameRect.height + padY * 2) / scale;
+        let sx = (frameRect.left - mediaLeft) / scale;
+        let sy = (frameRect.top - mediaTop) / scale;
+        let sw = frameRect.width / scale;
+        let sh = frameRect.height / scale;
 
         sx = Math.max(0, sx);
         sy = Math.max(0, sy);
@@ -378,21 +375,28 @@
     }
 
     function captureViewfinderFrame(binarize = true) {
-        const mapping = getStripMapping();
-        if (!mapping) return null;
+        const square = getStripMapping();
+        if (!square) return null;
 
-        const { sx, sy, sw, sh } = mapping;
-        const stripW = Math.max(1, Math.round(sw));
-        const stripH = Math.max(1, Math.round(sh));
+        const { sx, sy, sw, sh } = square;
 
-        // Locate the printed line first, then crop tightly around it.
-        const analysisScale = Math.min(1, 900 / stripW);
-        const aw = Math.max(1, Math.round(stripW * analysisScale));
-        const ah = Math.max(1, Math.round(stripH * analysisScale));
+        // Scan a little beyond the square. A number that runs past the square
+        // is detected here and rejected instead of being read partially.
+        const extraX = Math.max(12, sw * 0.2);
+        const extraY = Math.max(12, sh * 0.6);
+        const ax = Math.max(0, sx - extraX);
+        const ay = Math.max(0, sy - extraY);
+        const areaW = Math.min(video.videoWidth, sx + sw + extraX) - ax;
+        const areaH = Math.min(video.videoHeight, sy + sh + extraY) - ay;
+        if (areaW < 8 || areaH < 8) return null;
+
+        const analysisScale = Math.min(1, 900 / areaW);
+        const aw = Math.max(1, Math.round(areaW * analysisScale));
+        const ah = Math.max(1, Math.round(areaH * analysisScale));
 
         analysisCanvas.width = aw;
         analysisCanvas.height = ah;
-        analysisCtx.drawImage(video, sx, sy, sw, sh, 0, 0, aw, ah);
+        analysisCtx.drawImage(video, ax, ay, areaW, areaH, 0, 0, aw, ah);
 
         const analysisData = analysisCtx.getImageData(0, 0, aw, ah).data;
         const totalPixels = aw * ah;
@@ -403,41 +407,41 @@
         }
 
         const binary = ScannerOCR.adaptiveBinarize(gray, aw, ah);
-
         const region = ScannerOCR.findTextRegion(binary, aw, ah);
+        if (!region) return null;
 
-        let cropX = sx;
-        let cropY = sy;
-        let cropW = sw;
-        let cropH = sh;
-        let upscale = Math.min(2.5, Math.max(1.5, 900 / Math.max(1, sw)));
+        const inverseScale = 1 / analysisScale;
+        const rx = ax + region.left * inverseScale;
+        const ry = ay + region.top * inverseScale;
+        const rw = region.width * inverseScale;
+        const rh = region.height * inverseScale;
 
-        if (region) {
-            const inverseScale = 1 / analysisScale;
-            const padXp = Math.max(8, Math.round(region.width * 0.14));
-            const padYp = Math.max(8, Math.round(region.height * 0.5));
-            const rx = Math.max(0, region.left - padXp);
-            const ry = Math.max(0, region.top - padYp);
-            const rw = Math.min(aw, region.left + region.width + padXp) - rx;
-            const rh = Math.min(ah, region.top + region.height + padYp) - ry;
+        // The whole number must sit inside the square with a small breathing
+        // margin, otherwise it is skipped and the user is asked to aim again.
+        const insetX = Math.max(2, sw * 0.02);
+        const insetY = Math.max(2, sh * 0.03);
+        const fullyInside =
+            rx >= sx + insetX &&
+            ry >= sy + insetY &&
+            rx + rw <= sx + sw - insetX &&
+            ry + rh <= sy + sh - insetY;
+        if (!fullyInside) return null;
 
-            cropX = sx + rx * inverseScale;
-            cropY = sy + ry * inverseScale;
-            cropW = rw * inverseScale;
-            cropH = rh * inverseScale;
-
-            const regionVideoHeight = region.height * inverseScale;
-            upscale = Math.min(6, Math.max(2, 60 / Math.max(1, regionVideoHeight)));
-        }
-
-        cropX = Math.max(0, cropX);
-        cropY = Math.max(0, cropY);
-        cropW = Math.min(cropW, video.videoWidth - cropX);
-        cropH = Math.min(cropH, video.videoHeight - cropY);
+        // Crop around the line, clamped to the square so nothing outside it
+        // can end up in the OCR image.
+        const padX = Math.max(4, rw * 0.14);
+        const padY = Math.max(4, rh * 0.5);
+        const cropX = Math.max(sx, rx - padX);
+        const cropY = Math.max(sy, ry - padY);
+        const cropRight = Math.min(sx + sw, rx + rw + padX);
+        const cropBottom = Math.min(sy + sh, ry + rh + padY);
+        const cropW = cropRight - cropX;
+        const cropH = cropBottom - cropY;
         if (cropW < 8 || cropH < 8) return null;
 
         // Keep the line near 1000px wide: enough detail for Tesseract without
         // wasting time on oversized images.
+        let upscale = Math.min(6, Math.max(2, 60 / Math.max(1, rh)));
         upscale = Math.min(upscale, 1000 / Math.max(1, cropW));
         const outW = Math.max(1, Math.round(cropW * upscale));
         const outH = Math.max(1, Math.round(cropH * upscale));
@@ -471,7 +475,12 @@
     }
 
     async function recognizeFrame(worker, image) {
-        const result = await worker.recognize(image);
+        const result = await worker.recognize(image, {}, {
+            text: true,
+            blocks: false,
+            hocr: false,
+            tsv: false,
+        });
         const data = (result && result.data) || {};
         const candidate = parseNumberFromOCR(data.text || '');
         const confidence = typeof data.confidence === 'number' ? data.confidence : 0;
