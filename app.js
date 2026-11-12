@@ -563,6 +563,39 @@
         return window.ScannerOCR ? ScannerOCR.parseNumber(text) : null;
     }
 
+    // Reads ٠١٢٣٤٥٦٧٨٩ with the bundled classifier; Tesseract's English model
+    // cannot read these shapes at all.
+    function recognizeArabicCanvas(canvas) {
+        if (!window.ScannerOCR || typeof ScannerOCR.recognizeArabicDigits !== 'function') return null;
+        const width = canvas.width;
+        const height = canvas.height;
+        if (width < 12 || height < 12) return null;
+
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const data = ctx.getImageData(0, 0, width, height).data;
+        const total = width * height;
+        const gray = new Uint8ClampedArray(total);
+        const histogram = new Uint32Array(256);
+        for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+            const g = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) | 0;
+            gray[p] = g;
+            histogram[g]++;
+        }
+
+        // The binary frame from enhanceCanvas only has 0/255 values, where Otsu
+        // has no split to find; fall back to the midpoint.
+        let threshold = ScannerOCR.otsuFromHistogram(histogram, total);
+        if (threshold <= 0 || threshold >= 255) threshold = 128;
+        const binary = new Uint8Array(total);
+        for (let p = 0; p < total; p++) binary[p] = gray[p] < threshold ? 1 : 0;
+
+        const read = ScannerOCR.recognizeArabicDigits(binary, width, height);
+        if (!read) return null;
+        const candidate = parseNumberFromOCR(read.text);
+        if (candidate === null) return null;
+        return { candidate, confidence: read.confidence };
+    }
+
     async function recognizeFrame(worker, image) {
         const outputs = { text: true, blocks: false, hocr: false, tsv: false };
         let result;
@@ -573,8 +606,16 @@
             result = await worker.recognize(image.toDataURL('image/png'));
         }
         const data = (result && result.data) || {};
-        const candidate = parseNumberFromOCR(data.text || '');
-        const confidence = typeof data.confidence === 'number' ? data.confidence : 0;
+        let candidate = parseNumberFromOCR(data.text || '');
+        let confidence = typeof data.confidence === 'number' ? data.confidence : 0;
+
+        if (candidate === null || confidence < 45) {
+            const arabic = recognizeArabicCanvas(image);
+            if (arabic && (candidate === null || arabic.confidence > confidence)) {
+                candidate = arabic.candidate;
+                confidence = arabic.confidence;
+            }
+        }
         return { candidate, confidence };
     }
 

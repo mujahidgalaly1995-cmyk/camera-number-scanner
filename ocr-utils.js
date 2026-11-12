@@ -276,6 +276,409 @@
         return best ? best.value : null;
     }
 
+    // ---------- Arabic-Indic digits ----------
+    // Small classifier for ٠١٢٣٤٥٦٧٨٩, which the bundled Tesseract models do
+    // not read. Weights are in arabic-digit-model.js; features are the
+    // normalized glyph plus gradient histograms and hole/density geometry.
+    const AR_DIGITS = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+    let arNet = null;
+
+    function arDecodeBase64(b64) {
+        if (typeof Buffer !== 'undefined') return Buffer.from(b64, 'base64');
+        const raw = atob(b64);
+        const out = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+        return out;
+    }
+
+    function arLoadNet() {
+        if (arNet) return arNet;
+        const model = global.ArabicDigitModel;
+        if (!model) return null;
+
+        const size = model.size;
+        const hidden = model.hidden;
+        const classes = model.classes;
+        const hogCells = model.hogCells;
+        const hogBins = model.hogBins;
+        const inSize = size * size;
+        const hogSize = hogCells * hogCells * hogBins;
+        const featSize = inSize + hogSize + 3;
+
+        const bytes = arDecodeBase64(model.weights);
+        const q = new Int8Array(bytes.buffer, bytes.byteOffset, bytes.length);
+        const counts = [featSize * hidden, hidden, hidden * classes, classes];
+        const parts = [];
+        let off = 0;
+        for (let t = 0; t < counts.length; t++) {
+            const part = q.subarray(off, off + counts[t]);
+            off += counts[t];
+            const scale = model.scales[t];
+            const deq = new Float32Array(part.length);
+            for (let i = 0; i < part.length; i++) deq[i] = part[i] * scale;
+            parts.push(deq);
+        }
+
+        arNet = {
+            size,
+            hidden,
+            classes,
+            hogCells,
+            hogBins,
+            inSize,
+            hogSize,
+            featSize,
+            W1: parts[0],
+            b1: parts[1],
+            W2: parts[2],
+            b2: parts[3],
+        };
+        return arNet;
+    }
+
+    function arExtractFeatures(net, patch) {
+        const size = net.size;
+        const feats = new Float32Array(net.featSize);
+        feats.set(patch, 0);
+        const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+
+        const hog = new Float32Array(net.hogSize);
+        for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+                const gx = patch[y * size + clamp(x + 1, 0, size - 1)] - patch[y * size + clamp(x - 1, 0, size - 1)];
+                const gy = patch[clamp(y + 1, 0, size - 1) * size + x] - patch[clamp(y - 1, 0, size - 1) * size + x];
+                const mag = Math.hypot(gx, gy);
+                if (mag < 0.04) continue;
+                let ang = Math.atan2(gy, gx);
+                if (ang < 0) ang += Math.PI * 2;
+                const binPos = (ang / (Math.PI * 2)) * net.hogBins;
+                const b0 = Math.floor(binPos) % net.hogBins;
+                const b1 = (b0 + 1) % net.hogBins;
+                const frac = binPos - Math.floor(binPos);
+                const cellX = Math.min(net.hogCells - 1, Math.floor((x * net.hogCells) / size));
+                const cellY = Math.min(net.hogCells - 1, Math.floor((y * net.hogCells) / size));
+                const base = (cellY * net.hogCells + cellX) * net.hogBins;
+                hog[base + b0] += mag * (1 - frac);
+                hog[base + b1] += mag * frac;
+            }
+        }
+        for (let c = 0; c < net.hogCells * net.hogCells; c++) {
+            let norm = 0;
+            for (let b = 0; b < net.hogBins; b++) norm += hog[c * net.hogBins + b] * hog[c * net.hogBins + b];
+            norm = Math.sqrt(norm) + 1e-4;
+            for (let b = 0; b < net.hogBins; b++) feats[net.inSize + c * net.hogBins + b] = hog[c * net.hogBins + b] / norm;
+        }
+
+        const ink = new Uint8Array(net.inSize);
+        let inkCount = 0;
+        let minX = size, maxX = -1, minY = size, maxY = -1;
+        for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+                if (patch[y * size + x] > 0.5) {
+                    ink[y * size + x] = 1;
+                    inkCount++;
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
+        }
+
+        let holes = 0;
+        const seen = new Uint8Array(net.inSize);
+        for (let start = 0; start < net.inSize; start++) {
+            if (ink[start] || seen[start]) continue;
+            const stack = [start];
+            seen[start] = 1;
+            let border = false;
+            let sizePx = 0;
+            while (stack.length) {
+                const idx = stack.pop();
+                sizePx++;
+                const cx = idx % size;
+                const cy = (idx / size) | 0;
+                if (cx === 0 || cy === 0 || cx === size - 1 || cy === size - 1) border = true;
+                if (cx > 0 && !ink[idx - 1] && !seen[idx - 1]) { seen[idx - 1] = 1; stack.push(idx - 1); }
+                if (cx < size - 1 && !ink[idx + 1] && !seen[idx + 1]) { seen[idx + 1] = 1; stack.push(idx + 1); }
+                if (cy > 0 && !ink[idx - size] && !seen[idx - size]) { seen[idx - size] = 1; stack.push(idx - size); }
+                if (cy < size - 1 && !ink[idx + size] && !seen[idx + size]) { seen[idx + size] = 1; stack.push(idx + size); }
+            }
+            if (!border && sizePx >= 3) holes++;
+        }
+
+        const bw = Math.max(1, maxX - minX + 1);
+        const bh = Math.max(1, maxY - minY + 1);
+        feats[net.inSize + net.hogSize] = Math.min(1, holes / 2);
+        feats[net.inSize + net.hogSize + 1] = inkCount / net.inSize;
+        feats[net.inSize + net.hogSize + 2] = Math.min(2, bw / bh) / 2;
+        return feats;
+    }
+
+    function arClassify(net, patch) {
+        const feats = arExtractFeatures(net, patch);
+        const hidden = new Float32Array(net.hidden);
+        for (let j = 0; j < net.hidden; j++) {
+            let sum = net.b1[j];
+            for (let i = 0; i < net.featSize; i++) sum += feats[i] * net.W1[i * net.hidden + j];
+            hidden[j] = sum > 0 ? sum : 0;
+        }
+        const probs = new Float32Array(net.classes);
+        let max = -Infinity;
+        for (let k = 0; k < net.classes; k++) {
+            let sum = net.b2[k];
+            for (let j = 0; j < net.hidden; j++) sum += hidden[j] * net.W2[j * net.classes + k];
+            probs[k] = sum;
+            if (sum > max) max = sum;
+        }
+        let denom = 0;
+        for (let k = 0; k < net.classes; k++) { probs[k] = Math.exp(probs[k] - max); denom += probs[k]; }
+        for (let k = 0; k < net.classes; k++) probs[k] /= denom;
+
+        let best = 0;
+        let second = 1;
+        if (probs[1] > probs[0]) { best = 1; second = 0; }
+        for (let k = 2; k < net.classes; k++) {
+            if (probs[k] > probs[best]) { second = best; best = k; }
+            else if (probs[k] > probs[second]) second = k;
+        }
+        return { best, prob: probs[best], margin: probs[best] - probs[second] };
+    }
+
+    // Fits the component into a square patch, ink coverage in [0, 1].
+    function arGlyphPatch(binary, width, comp) {
+        const net = arLoadNet();
+        const size = net.size;
+        const inner = size - 2;
+        const bw = comp.width;
+        const bh = comp.height;
+        const scale = Math.min(inner / bw, inner / bh);
+        const tw = Math.max(1, Math.round(bw * scale));
+        const th = Math.max(1, Math.round(bh * scale));
+        const offX = Math.floor((size - tw) / 2);
+        const offY = Math.floor((size - th) / 2);
+        const patch = new Float32Array(size * size);
+
+        for (let ty = 0; ty < th; ty++) {
+            for (let tx = 0; tx < tw; tx++) {
+                const sx = comp.left + ((tx + 0.5) * bw) / tw - 0.5;
+                const sy = comp.top + ((ty + 0.5) * bh) / th - 0.5;
+                const x0 = Math.floor(sx);
+                const y0 = Math.floor(sy);
+                const fx = sx - x0;
+                const fy = sy - y0;
+                let v = 0;
+                for (let dy = 0; dy <= 1; dy++) {
+                    for (let dx = 0; dx <= 1; dx++) {
+                        const px = Math.min(comp.left + bw - 1, Math.max(comp.left, x0 + dx));
+                        const py = Math.min(comp.top + bh - 1, Math.max(comp.top, y0 + dy));
+                        const wt = (dx ? fx : 1 - fx) * (dy ? fy : 1 - fy);
+                        v += (binary[py * width + px] ? 1 : 0) * wt;
+                    }
+                }
+                patch[(offY + ty) * size + offX + tx] = v;
+            }
+        }
+        return patch;
+    }
+
+    function arComponents(binary, width, height) {
+        const labels = new Int32Array(width * height).fill(-1);
+        const comps = [];
+        const stack = new Int32Array(width * height);
+        let nextLabel = 0;
+
+        for (let start = 0; start < binary.length; start++) {
+            if (!binary[start] || labels[start] >= 0) continue;
+            const label = nextLabel++;
+            labels[start] = label;
+            stack[0] = start;
+            let count = 1;
+            let left = start % width, right = left, minY = (start / width) | 0, maxY = minY;
+
+            while (count > 0) {
+                const idx = stack[--count];
+                const x = idx % width;
+                const y = (idx / width) | 0;
+                if (x < left) left = x;
+                if (x > right) right = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+
+                for (let dy = -1; dy <= 1; dy++) {
+                    const ny = y + dy;
+                    if (ny < 0 || ny >= height) continue;
+                    for (let dx = -1; dx <= 1; dx++) {
+                        if (!dx && !dy) continue;
+                        const nx = x + dx;
+                        if (nx < 0 || nx >= width) continue;
+                        const n = ny * width + nx;
+                        if (binary[n] && labels[n] < 0) {
+                            labels[n] = label;
+                            stack[count++] = n;
+                        }
+                    }
+                }
+            }
+
+            comps[label] = {
+                left,
+                top: minY,
+                width: right - left + 1,
+                height: maxY - minY + 1,
+                area: 0,
+                bottom: maxY,
+            };
+        }
+
+        // Second pass for exact areas.
+        for (let i = 0; i < binary.length; i++) {
+            if (binary[i] && labels[i] >= 0) comps[labels[i]].area++;
+        }
+        return comps.filter(Boolean);
+    }
+
+    // Reads a line of Arabic-Indic digits from a binary image (1 = ink).
+    function recognizeArabicDigits(binary, width, height) {
+        const net = arLoadNet();
+        if (!net || width < 12 || height < 12) return null;
+
+        const comps = arComponents(binary, width, height);
+        if (!comps.length) return null;
+
+        let maxHeight = 0;
+        for (const c of comps) if (c.height > maxHeight) maxHeight = c.height;
+        if (maxHeight < 10) return null;
+        const minArea = Math.max(6, Math.round(maxHeight * maxHeight * 0.006));
+
+        let glyphs = comps.filter((c) => c.area >= minArea);
+        if (!glyphs.length) return null;
+
+        // Thin strokes can break apart at low resolution; rejoin fragments that
+        // sit next to each other on the same line.
+        let joined = true;
+        while (joined) {
+            joined = false;
+            outer:
+            for (let i = 0; i < glyphs.length; i++) {
+                for (let j = i + 1; j < glyphs.length; j++) {
+                    const a = glyphs[i];
+                    const b = glyphs[j];
+                    const gap = Math.max(a.left, b.left) - Math.min(a.left + a.width, b.left + b.width);
+                    if (gap > maxHeight * 0.05) continue;
+                    const overlapY = Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top);
+                    if (overlapY < Math.min(a.height, b.height) * 0.6) continue;
+                    const left = Math.min(a.left, b.left);
+                    const right = Math.max(a.left + a.width, b.left + b.width);
+                    const top = Math.min(a.top, b.top);
+                    const bottom = Math.max(a.top + a.height, b.top + b.height);
+                    if (right - left > maxHeight * 0.9) continue;
+                    const cand = {
+                        left,
+                        top,
+                        width: right - left,
+                        height: bottom - top,
+                        area: a.area + b.area,
+                        bottom,
+                    };
+                    // Only join when the combined shape clearly reads as one digit.
+                    const cres = arClassify(net, arGlyphPatch(binary, width, cand));
+                    if (cres.prob < 0.95 || cres.margin < 0.6) continue;
+                    glyphs[i] = cand;
+                    glyphs.splice(j, 1);
+                    joined = true;
+                    break outer;
+                }
+            }
+        }
+
+        // Arabic separators (٬ ٫) hang below the digits on either side of them,
+        // which is independent of font, tilt and the glyphs' own shapes.
+        const neighborSpan = maxHeight * 1.5;
+        const neighborBaseline = glyphs.map((c) => {
+            const cx = c.left + c.width / 2;
+            let bottom = -Infinity;
+            for (const o of glyphs) {
+                if (o === c) continue;
+                if (Math.abs(o.left + o.width / 2 - cx) > neighborSpan) continue;
+                if (o.bottom > bottom) bottom = o.bottom;
+            }
+            return bottom;
+        });
+
+        const items = [];
+        let minProb = 1;
+        let lastRight = -Infinity;
+
+        const sorted = glyphs.slice().sort((a, b) => a.left - b.left);
+
+        for (const comp of sorted) {
+            const patch = arGlyphPatch(binary, width, comp);
+            const res = arClassify(net, patch);
+
+            const small = comp.height <= maxHeight * 0.6;
+            const localBottom = neighborBaseline[glyphs.indexOf(comp)];
+            const relBottom = Number.isFinite(localBottom)
+                ? (comp.bottom - localBottom) / maxHeight
+                : -1;
+            const belowLine =
+                relBottom > 0.11 || (relBottom > 0.07 && comp.height > maxHeight * 0.46);
+            const weak = res.prob < 0.9 || res.margin < 0.45;
+
+            if (small && (belowLine || weak)) {
+                items.push({ sep: ',' });
+                continue;
+            }
+
+            if (weak) return null;
+
+            // ٢/٣ and ٤/٥ are easy to mix in some fonts; demand more certainty.
+            const risky =
+                (res.best === 2 || res.best === 3) ||
+                (res.best === 4 || res.best === 5);
+            if (risky && res.margin < 0.75) return null;
+
+            if (comp.left < lastRight - comp.width * 0.3) return null;
+            lastRight = comp.left + comp.width;
+
+            if (res.prob < minProb) minProb = res.prob;
+            items.push({ char: AR_DIGITS[res.best], classId: res.best, height: comp.height });
+        }
+
+        const digits = items.filter((it) => it.char);
+
+        if (digits.length < 2) return null;
+
+        // Decide each separator from the group it starts: 1-2 digits means a
+        // decimal point, otherwise it is a thousands separator.
+        let text = '';
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (item.char) {
+                text += item.char;
+                continue;
+            }
+            let group = 0;
+            for (let j = i + 1; j < items.length && items[j].char; j++) group++;
+            text += group > 0 && group <= 2 ? '.' : ',';
+        }
+
+        // Digits on one line have similar heights (٠ and ٥ are naturally small).
+        const tall = digits.filter((d) => d.classId !== 0 && d.classId !== 5).map((d) => d.height);
+        if (tall.length >= 2) {
+            tall.sort((a, b) => a - b);
+            const median = tall[(tall.length / 2) | 0];
+            for (const h of tall) {
+                if (h < median * 0.55 || h > median * 1.6) return null;
+            }
+        }
+
+        return {
+            text,
+            confidence: Math.round(minProb * 100),
+        };
+    }
+
     const api = {
         percentileFromHistogram,
         otsuFromHistogram,
@@ -283,6 +686,7 @@
         findTextRegion,
         normalizeDigits,
         parseNumber,
+        recognizeArabicDigits,
     };
 
     if (typeof module !== 'undefined' && module.exports) {
