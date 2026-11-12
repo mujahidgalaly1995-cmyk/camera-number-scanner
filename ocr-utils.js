@@ -606,11 +606,8 @@
             return bottom;
         });
 
-        const items = [];
-        let minProb = 1;
-        let lastRight = -Infinity;
-
         const sorted = glyphs.slice().sort((a, b) => a.left - b.left);
+        const marks = [];
 
         for (const comp of sorted) {
             const patch = arGlyphPatch(binary, width, comp);
@@ -624,58 +621,139 @@
             const belowLine =
                 relBottom > 0.11 || (relBottom > 0.07 && comp.height > maxHeight * 0.46);
             const weak = res.prob < 0.9 || res.margin < 0.45;
-
-            if (small && (belowLine || weak)) {
-                items.push({ sep: ',' });
-                continue;
-            }
-
-            if (weak) return null;
-
             // ٢/٣ and ٤/٥ are easy to mix in some fonts; demand more certainty.
             const risky =
                 (res.best === 2 || res.best === 3) ||
                 (res.best === 4 || res.best === 5);
-            if (risky && res.margin < 0.75) return null;
+            const confidentDigit = !weak && !(risky && res.margin < 0.75);
 
-            if (comp.left < lastRight - comp.width * 0.3) return null;
-            lastRight = comp.left + comp.width;
+            let type;
+            if (small && (belowLine || weak)) type = 'sep';
+            else if (confidentDigit) type = 'digit';
+            else type = 'other';
 
-            if (res.prob < minProb) minProb = res.prob;
-            items.push({ char: AR_DIGITS[res.best], classId: res.best, height: comp.height });
+            marks.push({ comp, res, type });
         }
 
-        const digits = items.filter((it) => it.char);
+        // Pretend everything around the number is noise: read the longest run
+        // of digits (letters, logos, currency words merely end a run).
+        const runs = [];
+        let run = [];
+        const closeRun = () => {
+            if (run.length) runs.push(run);
+            run = [];
+        };
+        for (const mark of marks) {
+            if (mark.type === 'other') {
+                closeRun();
+                continue;
+            }
+            run.push(mark);
+        }
+        closeRun();
 
-        if (digits.length < 2) return null;
+        let best = null;
+        for (const candidateRun of runs) {
+            let items = candidateRun.slice();
+
+            // Letters next to a number can classify as digits. Digits of one
+            // number are evenly spaced, so a much wider centre-to-centre step
+            // marks where the real number starts/ends; cut the smaller side off.
+            for (;;) {
+                if (items.length < 4) break;
+                const steps = [];
+                for (let i = 1; i < items.length; i++) {
+                    const prev = items[i - 1].comp;
+                    const next = items[i].comp;
+                    steps.push((next.left + next.width / 2) - (prev.left + prev.width / 2));
+                }
+                const sortedSteps = steps.slice().sort((a, b) => a - b);
+                const median = sortedSteps[(sortedSteps.length / 2) | 0];
+                let maxIndex = 0;
+                for (let i = 1; i < steps.length; i++) if (steps[i] > steps[maxIndex]) maxIndex = i;
+                const outlier = Math.max(median * 1.5, maxHeight);
+                if (steps[maxIndex] <= outlier) break;
+                const leftPart = items.slice(0, maxIndex + 1);
+                const rightPart = items.slice(maxIndex + 1);
+                const leftDigits = leftPart.filter((m) => m.type === 'digit').length;
+                const rightDigits = rightPart.filter((m) => m.type === 'digit').length;
+                if (leftDigits >= 2 && rightDigits >= 2) {
+                    items = leftDigits >= rightDigits ? leftPart : rightPart;
+                } else if (leftDigits >= 2) {
+                    items = leftPart;
+                } else if (rightDigits >= 2) {
+                    items = rightPart;
+                } else {
+                    break;
+                }
+            }
+            while (items.length && items[0].type === 'sep') items.shift();
+            while (items.length && items[items.length - 1].type === 'sep') items.pop();
+
+            const digits = items.filter((m) => m.type === 'digit');
+            if (digits.length < 2) continue;
+
+            // A narrow, digit-sized mark sitting right against either end of
+            // the run is more likely a dropped digit than a surrounding word.
+            const first = items[0].comp;
+            const last = items[items.length - 1].comp;
+            const maxDigitHeight = Math.max(...digits.map((d) => d.comp.height));
+            const edgePoisoned = marks.some((m) => {
+                if (m.type !== 'other') return false;
+                const c = m.comp;
+                if (c.height < maxDigitHeight * 0.55 || c.height > maxDigitHeight * 1.6) return false;
+                if (c.width > maxHeight * 0.7) return false;
+                const before = first.left - (c.left + c.width);
+                const after = c.left - (last.left + last.width);
+                return (before >= 0 && before <= maxHeight * 0.2) ||
+                    (after >= 0 && after <= maxHeight * 0.2);
+            });
+            if (edgePoisoned) continue;
+
+            // Digits on one line have similar heights (٠ and ٥ are naturally small).
+            const tall = digits.filter((d) => d.res.best !== 0 && d.res.best !== 5).map((d) => d.comp.height);
+            if (tall.length >= 2) {
+                tall.sort((a, b) => a - b);
+                const median = tall[(tall.length / 2) | 0];
+                if (tall.some((h) => h < median * 0.55 || h > median * 1.6)) continue;
+            }
+
+            let minProb = 1;
+            let lastRight = -Infinity;
+            let overlapping = false;
+            for (const mark of items) {
+                if (mark.type !== 'digit') continue;
+                if (mark.comp.left < lastRight - mark.comp.width * 0.3) overlapping = true;
+                lastRight = mark.comp.left + mark.comp.width;
+                if (mark.res.prob < minProb) minProb = mark.res.prob;
+            }
+            if (overlapping) continue;
+
+            if (!best || digits.length > best.digits || (digits.length === best.digits && minProb > best.minProb)) {
+                best = { run: items, digits: digits.length, minProb };
+            }
+        }
+
+        if (!best) return null;
 
         // Decide each separator from the group it starts: 1-2 digits means a
         // decimal point, otherwise it is a thousands separator.
         let text = '';
+        const items = best.run;
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
-            if (item.char) {
-                text += item.char;
+            if (item.type === 'digit') {
+                text += AR_DIGITS[item.res.best];
                 continue;
             }
             let group = 0;
-            for (let j = i + 1; j < items.length && items[j].char; j++) group++;
+            for (let j = i + 1; j < items.length && items[j].type === 'digit'; j++) group++;
             text += group > 0 && group <= 2 ? '.' : ',';
-        }
-
-        // Digits on one line have similar heights (٠ and ٥ are naturally small).
-        const tall = digits.filter((d) => d.classId !== 0 && d.classId !== 5).map((d) => d.height);
-        if (tall.length >= 2) {
-            tall.sort((a, b) => a - b);
-            const median = tall[(tall.length / 2) | 0];
-            for (const h of tall) {
-                if (h < median * 0.55 || h > median * 1.6) return null;
-            }
         }
 
         return {
             text,
-            confidence: Math.round(minProb * 100),
+            confidence: Math.round(best.minProb * 100),
         };
     }
 

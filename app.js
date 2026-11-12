@@ -609,7 +609,12 @@
         let candidate = parseNumberFromOCR(data.text || '');
         let confidence = typeof data.confidence === 'number' ? data.confidence : 0;
 
-        if (candidate === null || confidence < 45) {
+        // English Tesseract sometimes emits a few bogus Latin digits (with no
+        // confidence) when it looks at Arabic-Indic numerals. Treat a read that
+        // weak, with no Latin letters around it, as "nothing found" and let
+        // the Arabic classifier try. A confident Latin read is never replaced.
+        const hasLetters = /[A-Za-z]/.test(data.text || '');
+        if (candidate === null || (confidence < 45 && !hasLetters)) {
             const arabic = recognizeArabicCanvas(image);
             if (arabic && (candidate === null || arabic.confidence > confidence)) {
                 candidate = arabic.candidate;
@@ -643,10 +648,12 @@
                     () => captureViewfinderFrame(true),
                 ];
             let best = null;
+            let captured = false;
 
             for (let attempt = 0; attempt < frames.length; attempt++) {
                 const image = frames[attempt]();
                 if (!image) continue;
+                captured = true;
 
                 const result = await recognizeFrame(worker, image);
                 if (result.candidate !== null && result.confidence >= MIN_READ_CONFIDENCE && (!best || result.confidence > best.confidence)) {
@@ -689,7 +696,12 @@
                 if (autoMisses >= 2) lastAutoAdd = { value: null };
             } else {
                 playBeep(false);
-                showNotification('ژمارەکە بە تەواوی لەناو چوارگۆشەکە دابنێ و دووبارە تاقی بکەرەوە', 'error');
+                showNotification(
+                    captured
+                        ? 'ژمارەکە نەخوێندرایەوە، تکایە نزیکتر یان لە ڕووناکی باشتر بکەرەوە'
+                        : 'ژمارەکە بە تەواوی لەناو چوارگۆشەکە دابنێ و دووبارە تاقی بکەرەوە',
+                    'error'
+                );
             }
         } catch (err) {
             console.error('Scan Error:', err);
