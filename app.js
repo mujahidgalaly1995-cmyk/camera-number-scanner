@@ -411,16 +411,27 @@
         if (!square) return null;
 
         const { sx, sy, sw, sh } = square;
+        const videoW = video.videoWidth || sw;
+        const videoH = video.videoHeight || sh;
 
-        // Analyze exactly the square. Keeping the analysis small keeps the
-        // local-threshold window tight enough for faint printed digits.
-        const analysisScale = Math.min(1, 900 / sw);
-        const aw = Math.max(1, Math.round(sw * analysisScale));
-        const ah = Math.max(1, Math.round(sh * analysisScale));
+        // Analyze a thin band around the square too, so a line that the
+        // square edge cuts through can be told apart from one that fits.
+        const haloX = Math.max(8, Math.round(sw * 0.06));
+        const haloY = Math.max(8, Math.round(sh * 0.12));
+        const ax = Math.max(0, sx - haloX);
+        const ay = Math.max(0, sy - haloY);
+        const ax2 = Math.min(videoW, sx + sw + haloX);
+        const ay2 = Math.min(videoH, sy + sh + haloY);
+        const drawW = ax2 - ax;
+        const drawH = ay2 - ay;
+
+        const analysisScale = Math.min(1, 900 / drawW);
+        const aw = Math.max(1, Math.round(drawW * analysisScale));
+        const ah = Math.max(1, Math.round(drawH * analysisScale));
 
         analysisCanvas.width = aw;
         analysisCanvas.height = ah;
-        analysisCtx.drawImage(video, sx, sy, sw, sh, 0, 0, aw, ah);
+        analysisCtx.drawImage(video, ax, ay, drawW, drawH, 0, 0, aw, ah);
 
         const analysisData = analysisCtx.getImageData(0, 0, aw, ah).data;
         const totalPixels = aw * ah;
@@ -431,39 +442,82 @@
         }
 
         const binary = ScannerOCR.adaptiveBinarize(gray, aw, ah);
-        const region = ScannerOCR.findTextRegion(binary, aw, ah);
-
         const inverseScale = 1 / analysisScale;
+
+        const sqLeft = (sx - ax) * analysisScale;
+        const sqTop = (sy - ay) * analysisScale;
+        const sqRight = (sx + sw - ax) * analysisScale;
+        const sqBottom = (sy + sh - ay) * analysisScale;
+
+        const regionVideo = (region) => ({
+            x: ax + region.left * inverseScale,
+            y: ay + region.top * inverseScale,
+            w: region.width * inverseScale,
+            h: region.height * inverseScale,
+        });
+        const tolerance = 2;
+        const insideSquare = (region) =>
+            region.left >= sqLeft - tolerance &&
+            region.top >= sqTop - tolerance &&
+            region.left + region.width <= sqRight + tolerance &&
+            region.top + region.height <= sqBottom + tolerance;
+
+        let band = ScannerOCR.findTextRegion(binary, aw, ah);
+        let detected = null;
+
+        if (band) {
+            if (insideSquare(band)) {
+                detected = regionVideo(band);
+            } else {
+                // The band reaches the halo, so the square may be cutting the
+                // line. Look at the square alone: a complete line there is
+                // safe, anything still touching the square border is clipped.
+                const sqX = Math.max(0, Math.round(sqLeft));
+                const sqY = Math.max(0, Math.round(sqTop));
+                const sqW = Math.max(1, Math.min(aw - sqX, Math.round(sqRight) - sqX));
+                const sqH = Math.max(1, Math.min(ah - sqY, Math.round(sqBottom) - sqY));
+                const sub = new Uint8Array(sqW * sqH);
+                for (let y = 0; y < sqH; y++) {
+                    const from = (sqY + y) * aw + sqX;
+                    sub.set(binary.subarray(from, from + sqW), y * sqW);
+                }
+                const subBand = ScannerOCR.findTextRegion(sub, sqW, sqH);
+                if (!subBand) return null;
+                const clipped =
+                    subBand.left <= 1 ||
+                    subBand.top <= 1 ||
+                    subBand.left + subBand.width >= sqW - 1 ||
+                    subBand.top + subBand.height >= sqH - 1;
+                if (clipped) return null;
+                detected = {
+                    x: ax + (sqX + subBand.left) * inverseScale,
+                    y: ay + (sqY + subBand.top) * inverseScale,
+                    w: subBand.width * inverseScale,
+                    h: subBand.height * inverseScale,
+                };
+            }
+        }
+
         let cropX = sx;
         let cropY = sy;
         let cropW = sw;
         let cropH = sh;
         let upscale = Math.min(2.5, Math.max(1.5, 900 / Math.max(1, sw)));
 
-        if (region) {
-            // Reject only when the line actually reaches the border, which
-            // means the square is cutting the number off.
-            const crossesBorder =
-                region.left <= 1 ||
-                region.top <= 1 ||
-                region.left + region.width >= aw - 1 ||
-                region.top + region.height >= ah - 1;
-            if (crossesBorder) return null;
+        if (detected) {
+            const padXp = Math.max(8, Math.round(detected.w * 0.14));
+            const padYp = Math.max(8, Math.round(detected.h * 0.5));
+            const rx = Math.max(sx, detected.x - padXp);
+            const ry = Math.max(sy, detected.y - padYp);
+            const rr = Math.min(sx + sw, detected.x + detected.w + padXp);
+            const rb = Math.min(sy + sh, detected.y + detected.h + padYp);
 
-            const padXp = Math.max(8, Math.round(region.width * 0.14));
-            const padYp = Math.max(8, Math.round(region.height * 0.5));
-            const rx = Math.max(0, region.left - padXp);
-            const ry = Math.max(0, region.top - padYp);
-            const rw = Math.min(aw, region.left + region.width + padXp) - rx;
-            const rh = Math.min(ah, region.top + region.height + padYp) - ry;
+            cropX = rx;
+            cropY = ry;
+            cropW = rr - rx;
+            cropH = rb - ry;
 
-            cropX = sx + rx * inverseScale;
-            cropY = sy + ry * inverseScale;
-            cropW = rw * inverseScale;
-            cropH = rh * inverseScale;
-
-            const regionVideoHeight = region.height * inverseScale;
-            upscale = Math.min(6, Math.max(2, 60 / Math.max(1, regionVideoHeight)));
+            upscale = Math.min(6, Math.max(2, 60 / Math.max(1, detected.h)));
         }
 
         // Never include anything outside the square in the OCR image.

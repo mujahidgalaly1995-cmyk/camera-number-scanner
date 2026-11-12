@@ -212,35 +212,65 @@
             .replace(/٫/g, '.');
     }
 
+    // Turns one OCR token such as "1.234,56" into a number.
+    function parseToken(raw) {
+        const s = raw.replace(/[^\d.,]/g, '').replace(/^[.,]+/, '').replace(/[.,]+$/, '');
+        if (!/\d/.test(s)) return null;
+
+        const hasDot = s.includes('.');
+        const hasComma = s.includes(',');
+        let decimalSep = null;
+
+        if (hasDot && hasComma) {
+            // The separator that appears last is the decimal one.
+            decimalSep = s.lastIndexOf('.') > s.lastIndexOf(',') ? '.' : ',';
+        } else if (hasDot) {
+            const groups = s.split('.');
+            if (groups.length === 2) {
+                // 45.250 is a printed thousands label, 12.5 is a decimal.
+                decimalSep = groups[1].length <= 2 ? '.' : null;
+            }
+        } else if (hasComma) {
+            const groups = s.split(',');
+            if (groups.length === 2) {
+                decimalSep = groups[1].length <= 2 ? ',' : null;
+            }
+        }
+
+        let intPart;
+        let fracPart = '';
+        if (decimalSep) {
+            const idx = s.lastIndexOf(decimalSep);
+            intPart = s.slice(0, idx).replace(/[.,]/g, '');
+            fracPart = s.slice(idx + 1).replace(/[.,]/g, '');
+        } else {
+            intPart = s.replace(/[.,]/g, '');
+        }
+        if (!intPart) return null;
+
+        const value = parseFloat(fracPart ? `${intPart}.${fracPart}` : intPart);
+        if (!Number.isFinite(value) || value <= 0) return null;
+
+        return { value, digits: intPart.length + fracPart.length };
+    }
+
     // Parses the most plausible positive number out of OCR output.
     function parseNumber(text) {
         if (!text) return null;
-        const normalized = normalizeDigits(text);
+        let normalized = normalizeDigits(text);
+        // OCR often inserts spaces around separators or in place of them.
+        normalized = normalized
+            .replace(/\s+([.,])/g, '$1')
+            .replace(/([.,])\s+/g, '$1')
+            .replace(/(\d)[ \t\u00a0]+(?=\d)/g, '$1');
+
         const matches = normalized.match(/\d[\d.,]*\d|\d/g) || [];
 
         let best = null;
-
         for (const match of matches) {
-            const raw = match.replace(/[.,]+$/, '');
-            if (!/^\d+(?:[.,]\d+)*$/.test(raw)) continue;
-
-            let cleaned;
-            if (raw.includes(',')) {
-                cleaned = raw.replace(/,/g, '');
-            } else if (/^\d{1,3}\.\d{3}$/.test(raw)) {
-                // Printed labels such as 45.250 normally mean 45,250.
-                cleaned = raw.replace('.', '');
-            } else {
-                cleaned = raw;
-            }
-
-            const value = parseFloat(cleaned);
-            if (!Number.isFinite(value) || value <= 0) continue;
-
-            const digits = cleaned.replace(/[.,]/g, '').length;
-            if (!best || digits > best.digits) {
-                best = { value, digits };
-            }
+            const parsed = parseToken(match);
+            if (!parsed) continue;
+            if (!best || parsed.digits > best.digits) best = parsed;
         }
 
         return best ? best.value : null;
