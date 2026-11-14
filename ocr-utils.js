@@ -80,7 +80,9 @@
     }
 
     // Finds the dominant line of dark text inside a binarized strip (1 = dark).
-    function findTextRegion(binary, width, height) {
+    // When focusX is given and the line holds more than one number, only the
+    // number nearest that x is returned (the one the user aimed at).
+    function findTextRegion(binary, width, height, focusX) {
         // Drop isolated specks (paper grain, sensor noise, camera blur) so faint
         // noise does not form rows that swallow the whole strip.
         const clean = new Uint8Array(binary.length);
@@ -207,8 +209,7 @@
 
         const minColumnPixels = Math.max(2, Math.round(bandHeight * 0.08));
         const minRunWidth = Math.max(3, Math.round(bandHeight * 0.06));
-        let left = width;
-        let right = -1;
+        const runs = [];
         let x = 0;
 
         while (x < width) {
@@ -216,13 +217,41 @@
             const start = x;
             while (x < width && columnCounts[x] >= minColumnPixels) x++;
             const runWidth = x - start;
-            if (runWidth >= minRunWidth) {
-                if (start < left) left = start;
-                if (x - 1 > right) right = x - 1;
-            }
+            if (runWidth >= minRunWidth) runs.push({ left: start, right: x - 1 });
         }
 
-        if (right < left) return null;
+        if (!runs.length) return null;
+
+        // Glyphs belonging to one number sit close together; a gap about as
+        // tall as the line separates two different numbers (table cells).
+        const numberGap = Math.max(6, Math.round(bandHeight * 0.8));
+        const groups = [];
+        for (const run of runs) {
+            const prev = groups[groups.length - 1];
+            if (prev && run.left - prev.right - 1 < numberGap) prev.right = run.right;
+            else groups.push({ left: run.left, right: run.right });
+        }
+
+        let left = groups[0].left;
+        let right = groups[groups.length - 1].right;
+
+        if (focusX > 0) {
+            // Short specks are never numbers; only digit-sized blocks compete.
+            const blocks = groups.filter((g) => g.right - g.left + 1 >= bandHeight * 0.35);
+            if (blocks.length > 1) {
+                let chosen = blocks[0];
+                let bestDist = Infinity;
+                for (const g of blocks) {
+                    const dist = Math.abs((g.left + g.right) / 2 - focusX);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        chosen = g;
+                    }
+                }
+                left = chosen.left;
+                right = chosen.right;
+            }
+        }
 
         return {
             left,

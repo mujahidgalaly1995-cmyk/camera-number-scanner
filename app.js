@@ -462,7 +462,8 @@
             region.left + region.width <= sqRight + tolerance &&
             region.top + region.height <= sqBottom + tolerance;
 
-        let band = ScannerOCR.findTextRegion(binary, aw, ah);
+        const focusX = (sqLeft + sqRight) / 2;
+        let band = ScannerOCR.findTextRegion(binary, aw, ah, focusX);
         let detected = null;
 
         if (band) {
@@ -481,7 +482,7 @@
                     const from = (sqY + y) * aw + sqX;
                     sub.set(binary.subarray(from, from + sqW), y * sqW);
                 }
-                const subBand = ScannerOCR.findTextRegion(sub, sqW, sqH);
+                const subBand = ScannerOCR.findTextRegion(sub, sqW, sqH, focusX - sqX);
                 if (!subBand) return null;
                 const clipped =
                     subBand.left <= 1 ||
