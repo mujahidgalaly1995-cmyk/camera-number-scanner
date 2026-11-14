@@ -108,6 +108,34 @@
             }
         }
 
+        // Table rules, paper edges and borders are long uninterrupted runs;
+        // remove them so they cannot outvote the actual text line.
+        const maxRun = Math.max(12, Math.round(width * 0.35));
+        for (let y = 0; y < height; y++) {
+            const row = y * width;
+            let x = 0;
+            while (x < width) {
+                while (x < width && !clean[row + x]) x++;
+                const start = x;
+                while (x < width && clean[row + x]) x++;
+                if (x - start >= maxRun) {
+                    for (let i = start; i < x; i++) clean[row + i] = 0;
+                }
+            }
+        }
+        const maxVRun = Math.max(10, Math.round(height * 0.6));
+        for (let x = 0; x < width; x++) {
+            let y = 0;
+            while (y < height) {
+                while (y < height && !clean[y * width + x]) y++;
+                const start = y;
+                while (y < height && clean[y * width + x]) y++;
+                if (y - start >= maxVRun) {
+                    for (let i = start; i < y; i++) clean[i * width + x] = 0;
+                }
+            }
+        }
+
         const rowCounts = new Uint32Array(height);
         for (let y = 0; y < height; y++) {
             const offset = y * width;
@@ -546,12 +574,20 @@
         const comps = arComponents(binary, width, height);
         if (!comps.length) return null;
 
+        // Solid background blocks (paper edges, shadow bands) are never glyphs.
+        // A tall thin stroke can still be a digit (١), so require width too.
+        const blockWidth = width * 0.1;
+        const foreground = comps.filter(
+            (c) => c.area <= width * height * 0.25 && !(c.height >= height * 0.9 && c.width >= blockWidth)
+        );
+        if (!foreground.length) return null;
+
         let maxHeight = 0;
-        for (const c of comps) if (c.height > maxHeight) maxHeight = c.height;
+        for (const c of foreground) if (c.height > maxHeight) maxHeight = c.height;
         if (maxHeight < 10) return null;
         const minArea = Math.max(6, Math.round(maxHeight * maxHeight * 0.006));
 
-        let glyphs = comps.filter((c) => c.area >= minArea);
+        let glyphs = foreground.filter((c) => c.area >= minArea);
         if (!glyphs.length) return null;
 
         // Thin strokes can break apart at low resolution; rejoin fragments that
@@ -656,23 +692,23 @@
         for (const candidateRun of runs) {
             let items = candidateRun.slice();
 
-            // Letters next to a number can classify as digits. Digits of one
-            // number are evenly spaced, so a much wider centre-to-centre step
-            // marks where the real number starts/ends; cut the smaller side off.
+            // Letters next to a number can classify as digits. The space before
+            // a word is much wider than the spacing between digits, so cut the
+            // smaller side off at that gap.
             for (;;) {
                 if (items.length < 4) break;
-                const steps = [];
+                const gapsArr = [];
                 for (let i = 1; i < items.length; i++) {
                     const prev = items[i - 1].comp;
                     const next = items[i].comp;
-                    steps.push((next.left + next.width / 2) - (prev.left + prev.width / 2));
+                    gapsArr.push(next.left - (prev.left + prev.width));
                 }
-                const sortedSteps = steps.slice().sort((a, b) => a - b);
-                const median = sortedSteps[(sortedSteps.length / 2) | 0];
+                const sortedGaps = gapsArr.slice().sort((a, b) => a - b);
+                const median = sortedGaps[(sortedGaps.length / 2) | 0];
                 let maxIndex = 0;
-                for (let i = 1; i < steps.length; i++) if (steps[i] > steps[maxIndex]) maxIndex = i;
-                const outlier = Math.max(median * 1.5, maxHeight);
-                if (steps[maxIndex] <= outlier) break;
+                for (let i = 1; i < gapsArr.length; i++) if (gapsArr[i] > gapsArr[maxIndex]) maxIndex = i;
+                const outlier = Math.max(median * 2.5, maxHeight * 0.45);
+                if (gapsArr[maxIndex] <= outlier) break;
                 const leftPart = items.slice(0, maxIndex + 1);
                 const rightPart = items.slice(maxIndex + 1);
                 const leftDigits = leftPart.filter((m) => m.type === 'digit').length;
